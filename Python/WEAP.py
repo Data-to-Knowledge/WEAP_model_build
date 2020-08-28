@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import win32com.client
-import ConfigParser
+#import ConfigParser
+import configparser
 import datetime as dt
 import os, shutil, sys
 import pandas as pd
@@ -22,7 +23,8 @@ class WEAP():
     
     def __init__(self):
         #-read config file with user settings
-        self.config = ConfigParser.RawConfigParser()
+        #self.config = ConfigParser.RawConfigParser()
+        self.config = configparser.RawConfigParser()
         self.config.read('config.cfg')
         
         #-read some directories
@@ -80,7 +82,7 @@ class WEAP():
         #-check if a new model should be built
         self.newModel = self.config.getint('AREA', 'newModel')
         if self.newModel:
-            print 'Initializing model...'
+            print('Initializing model...')
             
             self.curAccountDate = dt.date(self.sdate.year-1, self.sdate.month, self.sdate.day) #-start date for the current accounts year
             
@@ -88,9 +90,9 @@ class WEAP():
             self.baseArea = self.config.get('AREA', 'baseArea')
             self.workArea = self.config.get('AREA', 'workArea')
             self.WEAP.ActiveArea = self.baseArea
-            print 'Using "%s" as base for new model "%s"' %(self.baseArea, self.workArea)
+            print('Using "%s" as base for new model "%s"' %(self.baseArea, self.workArea))
             if self.WEAP.Areas.Exists(self.workArea):
-                print '"%s" already exists and will be overwritten' %(self.workArea)
+                print('"%s" already exists and will be overwritten' %(self.workArea))
                 shutil.rmtree(os.path.join(self.WEAP.AreasDirectory, self.workArea))
             self.WEAP.SaveAreaAs(self.workArea)
             self.WEAP.ActiveArea = self.workArea
@@ -104,13 +106,13 @@ class WEAP():
                     firstTimeStep = (self.curAccountDate - dt.date(self.WEAP.BaseYear,1,1)).days + 2
                 else:
                     firstTimeStep = (self.curAccountDate - dt.date(self.WEAP.BaseYear,1,1)).days + 1
-                print 'Model simulation period is %s through %s with %s as current accounts year' %(self.sdate.strftime('%d-%m-%Y'), self.edate.strftime('%d-%m-%Y'), self.curAccountDate.year)
+                print('Model simulation period is %s through %s with %s as current accounts year' %(self.sdate.strftime('%d-%m-%Y'), self.edate.strftime('%d-%m-%Y'), self.curAccountDate.year))
             else:
                 firstTimeStep = self.curAccountDate.month
-                print 'Model simulation period is %s through %s with %s as current accounts year' %(self.sdate.strftime('%B %Y'), self.edate.strftime('%B %Y'), self.curAccountDate.year)
+                print('Model simulation period is %s through %s with %s as current accounts year' %(self.sdate.strftime('%B %Y'), self.edate.strftime('%B %Y'), self.curAccountDate.year))
             if self.WEAP.WaterYearStart != firstTimeStep:
                 self.WEAP.WaterYearStart = firstTimeStep
-            print 'Each simulation year has %d time steps' %self.WEAP.NumTimeSteps
+            print('Each simulation year has %d time steps' %self.WEAP.NumTimeSteps)
             self.WEAP.SaveArea()
         else:
             self.workArea = self.config.get('AREA', 'workArea')
@@ -194,7 +196,6 @@ class WEAP():
             from lowflows.lowflows import getBandInfo, addIRFsite, addBands
             #-get low flow band information
             self.bands = getBandInfo(self.config)
-            #print self.bands
             #-add the Irrigation Restriction Flow (IRF) site(s) and time-series to the model
             addIRFsite(self.WEAP, self.config, self.bands, self.sdate, self.edate)
             #-for each low flow site, add the bands with associated max_trig, min_trig, and Ballocated (=calculated based on max_trig and min_trig and IRF) 
@@ -331,32 +332,32 @@ class WEAP():
                 if demand == 'max_conditions':
                     #-set daily restriction volumes as demand on demand nodes
                     from consents.consents import set_demand_to_restrict_daily_vol
-                    print 'Using daily restrictions for demand'
+                    print('Using daily restrictions for demand')
                     set_demand_to_restrict_daily_vol(self)
                 elif '.csv' in demand:
-                    print 'Using time-series from csv-file for demand'
+                    print('Using time-series from csv-file for demand')
                     from consents.consents import set_demand_to_csv_ts
                     set_demand_to_csv_ts(self)
                 elif demand == '0':
-                    print 'Setting demand to zero for all nodes'
+                    print('Setting demand to zero for all nodes')
                     from consents.consents import set_demand_to_zero
                     set_demand_to_zero(self)
                 else:
-                    print 'Nothing specified for demand. This means no water is taken from the streams or groundwater nodes!'
+                    print('Nothing specified for demand. This means no water is taken from the streams or groundwater nodes!')
             else:
-                print 'Demand settings remain unchanged.'
+                print('Demand settings remain unchanged.')
                 
             #-Set restrictions on transmission links (to SW take or GW take)
             self.set_restrictions_transmission = self.config.getint('CONSENTS_PART_2', 'set_restrictions_transmission')
             if self.set_restrictions_transmission:
                 from consents.consents import set_restriction_on_transmission_links
-                print 'Setting daily restriction volumes on transmission links to groundwater and surface water take nodes'
+                print('Setting daily restriction volumes on transmission links to groundwater and surface water take nodes')
                 set_restriction_on_transmission_links(self)
             #-Set restrictions on diverts
             self.set_restrictions_divert = self.config.getint('CONSENTS_PART_2', 'set_restrictions_divert')
             if self.set_restrictions_divert:
                 from consents.consents import set_restriction_on_diverts
-                print 'Setting daily restriction volumes on diverts'
+                print('Setting daily restriction volumes on diverts')
                 set_restriction_on_diverts(self)
             #-Remove restrictions on transmission links (to SW take or GW take)
             self.remove_restrictions_transmission = self.config.getint('CONSENTS_PART_2', 'remove_restrictions_transmission')
@@ -379,17 +380,17 @@ class WEAP():
         '''
         Display some information about the models (areas)
         '''
-        print 'WEAP working directory:\n\t%s\n' %self.WEAP.WorkingDirectory
-        print 'WEAP areas directory:\n\t%s\n' %self.WEAP.AreasDirectory
+        print('WEAP working directory:\n\t%s\n' %self.WEAP.WorkingDirectory)
+        print('WEAP areas directory:\n\t%s\n' %self.WEAP.AreasDirectory)
 
-        print 'WEAP contains the following areas:'
+        print('WEAP contains the following areas:')
         for i in self.WEAP.Areas:
-            print '\t%s' %i.Name
-        print '\nActive area:\n\t%s' %self.WEAP.ActiveArea.Name
-        print '\nScenarios in active area:'
+            print('\t%s' %i.Name)
+        print('\nActive area:\n\t%s' %self.WEAP.ActiveArea.Name)
+        print('\nScenarios in active area:')
         for i in self.WEAP.Scenarios:
-            print '\t%s' %i.Name
-        print '\nActive scenario:\n\t%s' %self.WEAP.ActiveScenario
+            print('\t%s' %i.Name)
+        print('\nActive scenario:\n\t%s' %self.WEAP.ActiveScenario)
 
     def getAreaInfo(self, area=False):
         '''
@@ -402,9 +403,9 @@ class WEAP():
         if area:
             self.WEAP.ActiveArea = area
     
-        print 'Providing info for area:\n\t%s' %self.WEAP.ActiveArea.Name
+        print('Providing info for area:\n\t%s' %self.WEAP.ActiveArea.Name)
         #-Display time settings for the current accounts
-        print 'Time settings:'
+        print('Time settings:')
         nrTimeSteps = self.WEAP.NumTimeSteps
         firstTimeStep = self.WEAP.FirstTimeStep
         lastTimeStep = firstTimeStep + nrTimeSteps - 1
@@ -417,33 +418,33 @@ class WEAP():
             else:
                 eyear = self.WEAP.BaseYear
             edate = dt.date(eyear, lastTimeStep, 1).strftime('%b %Y')
-            print '\tCurrent accounts runs from %s through %s' %(sdate, edate)
+            print('\tCurrent accounts runs from %s through %s' %(sdate, edate))
         else:
             deltaT = 'daily'
             if nrTimeSteps == 366:
                 leapDays = True
             else:
                 leapDays = False
-            print '\tLeap days is %s' %leapDays
-            print '\tTime-step is %s' %deltaT
+            print('\tLeap days is %s' %leapDays)
+            print('\tTime-step is %s' %deltaT)
             if lastTimeStep - nrTimeSteps >0:
                 lastTimeStep = lastTimeStep - nrTimeSteps
                 eyear = self.WEAP.BaseYear + 1
             else:
                 eyear = self.WEAP.BaseYear
-            print '\tCurrent accounts runs from: %s %s through %s %s' %(self.WEAP.TimeStepName(firstTimeStep), self.WEAP.BaseYear, self.WEAP.TimeStepName(lastTimeStep), eyear)
+            print('\tCurrent accounts runs from: %s %s through %s %s' %(self.WEAP.TimeStepName(firstTimeStep), self.WEAP.BaseYear, self.WEAP.TimeStepName(lastTimeStep), eyear))
         #-Display information for each scenario
-        print 'Scenarios:'
+        print('Scenarios:')
         for s in self.WEAP.Scenarios:
             if s.Name != 'Current Accounts':
                 self.WEAP.ActiveScenario = s
-                print '\t%s' %s
+                print('\t%s' %s)
                 if deltaT == 'daily':
-                    print '\t\tRuns from: %s %s through %s %s' %(self.WEAP.TimeStepName(firstTimeStep), s.FirstYear, self.WEAP.TimeStepName(lastTimeStep), s.LastYear)
+                    print('\t\tRuns from: %s %s through %s %s' %(self.WEAP.TimeStepName(firstTimeStep), s.FirstYear, self.WEAP.TimeStepName(lastTimeStep), s.LastYear))
                 else:
                     sdate = dt.date(s.FirstYear, firstTimeStep, 1).strftime('%b %Y')
                     edate = dt.date(s.LastYear, lastTimeStep, 1).strftime('%b %Y')
-                    print '\t\tRuns from: %s through %s' %(sdate, edate)
+                    print('\t\tRuns from: %s through %s' %(sdate, edate))
             
         #-reset to original active area and scenario
         self.WEAP.ActiveArea = activeArea

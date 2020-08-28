@@ -2,18 +2,18 @@
 
 import pandas as pd
 import numpy as np
-import pdsql, os
+import pdsql, os, sys
 import datetime as dt
 
 from groundwater.stream_depletion import Theis
 from other_functions.reproject import reproject
 
-#-Authorship information-###################################################################
+# Authorship information-###################################################################
 __author__ = 'Wilco Terink'
 __copyright__ = 'Wilco Terink'
 __version__ = '1.0'
 __email__ = 'wilco.terink@ecan.govt.nz'
-__date__ ='August 2020'
+__date__ = 'August 2020'
 ############################################################################################
 
 pd.options.display.max_columns = 100
@@ -45,7 +45,7 @@ TSDataNumericDaily - daily time-series values (e.g. abstraction data)
 
 
 
-def get_CRC_DB(config):    
+def get_CRC_DB(config):
     '''
     Returns two dataframes with:
         - All required consent data for WEAP model building for consents being active between sdate and edate, and located in the list of SWAZs.
@@ -54,100 +54,110 @@ def get_CRC_DB(config):
         - All required consent data for WEAP model building for consents being active between sdate and edate, and located in the list of SWAZs.
         - Time-series of metered WAPs for the consents that have been selected in the dataframe above.
     '''
-    
-    #-Extract period from config file for which to select the consents (active during that period)
+
+    # Extract period from config file for which to select the consents (active during that period)
     syear = config.getint('TIMINGS', 'syear') - 1
     smonth = config.getint('TIMINGS', 'smonth')
     sday = config.getint('TIMINGS', 'sday')
     sdate = dt.date(syear, smonth, sday)
-    
+
     eyear = config.getint('TIMINGS', 'eyear')
     emonth = config.getint('TIMINGS', 'emonth')
     eday = config.getint('TIMINGS', 'eday')
     edate = dt.date(eyear, emonth, eday)
-    
-    #-Get directory in which consent info resides
+
+    # Get directory in which consent info resides
     crc_dir = config.get('CONSENTS', 'crc_dir')
-    #-Get SWAZs for which to select consents
+    # Get SWAZs for which to select consents
     SWAZs = config.get('CONSENTS', 'SWAZS').split(',')
-    #-Get discharge consents from csv-file
+    # Get discharge consents from csv-file
     discharge_consents_csv = os.path.join(crc_dir, config.get('CONSENTS', 'discharge_csv'))
-    #-Get csv-file to write detailed consent information to
+    # Get csv-file to write detailed consent information to
     crc_csv_out = os.path.join(crc_dir, config.get('CONSENTS', 'crc_csv_out'))
-    #-Get csv-file to write metered WAP time-series to
+    # Get csv-file to write metered WAP time-series to
     wapTS_csv_out = os.path.join(crc_dir, config.get('CONSENTS', 'wapTS_csv_out'))
 
 #     #-Get csv-file to write time-series with consent being active or inactive for each day during the simulation period
 #     crc_active_csv = os.path.join(crc_dir, config.get('CONSENTS', 'crc_active_csv'))
-    
-    
-    #-Dictionary to convert string from month and to month to numbers
-    month_dict = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
-    #-Dictionary to replace Yes/No values with 1,0
+
+    # Dictionary to convert string from month and to month to numbers
+    month_dict = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
+    # Dictionary to replace Yes/No values with 1,0
     yes_no_dict = {'Yes': 1, 'No': 0, 'yes': 1, 'no': 0, 'YES': 1, 'NO': 0}
-    #-list to add warnings/erros    
+    # list to add warnings/erros
     lMessageList = []
 
-    #-Get consent numbers that are only related to takes and diverts
-    all_take_divert_consents = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterConsent', col_names = ['RecordNo'])
-    
+    # Get consent numbers that are only related to takes and diverts
+    print('Getting all surface- and groundwater take consents...')
+    all_take_consents = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterPermitAuthorisation', col_names = ['RecordNumber'])
+    all_take_consents.drop_duplicates(inplace=True)
+    all_divert_consents = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_DivertWater_Water', col_names = ['RecordNumber'])
+    all_divert_consents.drop_duplicates(inplace=True)
+    all_take_divert_consents = pd.concat([all_take_consents, all_divert_consents])
+    all_take_divert_consents.drop_duplicates(inplace=True)
+    all_take_consents = None; all_divert_consents = None;
+
     #-Get all the WAPs that are within one of the selected SWAZs from the D_SW_WellsDetails table
-    print 'Filtering WAPs located within the selected Surface Water Allocation Zones...'
-    SWAZ_WAPs = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_SW_WellsDetails', col_names = ['WellNo', 'SWAllocationZone', 'Depth'], where_col={'SWAllocationZone': SWAZs})
+    print('Filtering WAPs located within the selected Surface Water Allocation Zones...')
+    SWAZ_WAPs = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_SW_WellsDetails', col_names = ['WellNo', 'SWAllocationZone', 'Depth'], where_in={'SWAllocationZone': SWAZs})
     SWAZ_WAPs.rename(columns={'SWAllocationZone':'SWAZ'}, inplace=True)
-        
-    ########-Filter out WAPs that OR have a screen depth <=30 m or a bore depth of <=30 (the or condition is needed because not all Wells have screens). All Depths with NaNs are also considered because
-    #these could be WAPs related to diverts
-    #-First get the wells that have a depth <=30 m
-    print 'Filtering WAPs that have a screen depth or bore depth <= 30 meter...'
-    WAP_depth_30m = SWAZ_WAPs.loc[(SWAZ_WAPs['Depth']<=30) | (pd.isna(SWAZ_WAPs['Depth'])), ['WellNo']]
-    #-Get Wells with top_screen <=30 m
-    WAP_screens = pdsql.mssql.rd_sql('sql2012prod05', 'Wells', 'SCREEN_DETAILS', col_names = ['WELL_NO', 'TOP_SCREEN'], where_col={'WELL_NO': SWAZ_WAPs['WellNo']})
+
+    # Filter out WAPs that OR have a screen depth <=Z m or a bore depth of <=Z (the or condition is needed because not all Wells have screens).
+    # All Depths with NaNs are also considered because these could be WAPs related to diverts
+    well_cutoff_depth = config.getfloat('CONSENTS', 'well_cutoff_depth')
+    print('Filtering WAPs that have a screen depth or bore depth <= %.2f meter...' %well_cutoff_depth)
+    #-First get the wells that have a depth <=Z m
+    WAP_depth_Zm = SWAZ_WAPs.loc[(SWAZ_WAPs['Depth']<=well_cutoff_depth) | (pd.isna(SWAZ_WAPs['Depth'])), ['WellNo']]
+    #-Get Wells with top_screen <=Z m
+
+    WAP_screens = pdsql.mssql.rd_sql('sql03prod', 'Wells', 'SCREEN_DETAILS', col_names = ['WELL_NO', 'TOP_SCREEN'], where_in={'WELL_NO': SWAZ_WAPs['WellNo'].tolist()})
     WAP_screens = WAP_screens.groupby('WELL_NO')['TOP_SCREEN'].min().reset_index()
-    WAP_screens = WAP_screens.loc[WAP_screens['TOP_SCREEN']<=30.]
+    WAP_screens = WAP_screens.loc[WAP_screens['TOP_SCREEN'] <= well_cutoff_depth]
     WAP_screens.rename(columns={'WELL_NO': 'WellNo'}, inplace=True)
     WAP_screens.drop('TOP_SCREEN', axis=1, inplace=True)
     #-Concat the two and only keep unique WAP numbers
-    WAP_30m = pd.concat([WAP_depth_30m, WAP_screens])
-    WAP_30m = pd.unique(WAP_30m['WellNo'])
-    #-Keep only the SWAZ WAPs that have a depth<=30 m or a top screen that is <=30m
-    SWAZ_WAPs = SWAZ_WAPs.loc[SWAZ_WAPs['WellNo'].isin(WAP_30m)]
-    WAP_depth_30m = None; WAP_screens = None; WAP_30m = None; del WAP_depth_30m, WAP_screens, WAP_30m   
+    WAP_Zm = pd.concat([WAP_depth_Zm, WAP_screens])
+    WAP_Zm = pd.unique(WAP_Zm['WellNo'])
+    #-Keep only the SWAZ WAPs that have a depth<=Z m or a top screen that is <=Zm
+    SWAZ_WAPs = SWAZ_WAPs.loc[SWAZ_WAPs['WellNo'].isin(WAP_Zm)]
+    SWAZ_WAPs.drop_duplicates(inplace=True)
+    WAP_depth_Zm = None; WAP_screens = None; WAP_Zm = None; del WAP_depth_Zm, WAP_screens, WAP_Zm
 
     #-Get all the consents related to the WAPs within the selected SWAZs
-    SWAZ_WAP_consents = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterWAPAlloc', col_names = ['RecordNo', 'WAP'], where_col={'WAP': list(SWAZ_WAPs['WellNo'])})
-    SWAZ_WAP_consents.drop_duplicates(subset='RecordNo', inplace=True)
+    SWAZ_WAP_consents = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterWAPAllocation', col_names = ['RecordNumber', 'WAP'], where_in={'WAP': list(SWAZ_WAPs['WellNo'])})
+    SWAZ_WAP_consents.drop_duplicates(subset='RecordNumber', inplace=True)
     #-Keep only the consents that are a divert or take
-    SWAZ_WAP_consents = SWAZ_WAP_consents.loc[SWAZ_WAP_consents['RecordNo'].isin(all_take_divert_consents['RecordNo'])]
-    
+    SWAZ_WAP_consents = SWAZ_WAP_consents.loc[SWAZ_WAP_consents['RecordNumber'].isin(all_take_divert_consents['RecordNumber'])]
+  
     #-Get all discharge consents located in the catchment of interest
-    print 'Get discharge consents from csv-file...'
+    print('Get discharge consents from csv-file...')
     discharge_consents = pd.read_csv(discharge_consents_csv)
-    discharge_consents.rename(columns={discharge_consents.columns[0]: all_take_divert_consents.columns[0], 'GIS_SWAllo':'SWAZ','NZTMX':'discharge_NZTMX', 'NZTMY':'discharge_NZTMY'}, inplace=True)
+    discharge_consents.rename(columns={discharge_consents.columns[0]: 'RecordNumber', 'GIS_SWAllo':'SWAZ','NZTMX':'discharge_NZTMX', 'NZTMY':'discharge_NZTMY'}, inplace=True)
     all_take_divert_consents = None; del all_take_divert_consents
-    
+
     #-merge consents into list of interested activity types (takes, diverts, and discharges)
-    print 'Merging take and divert consents with list of discharge consents...'
-    all_consents = pd.concat([SWAZ_WAP_consents['RecordNo'], discharge_consents['RecordNo']])
+    print('Merging take and divert consents with list of discharge consents...')
+    all_consents = pd.concat([SWAZ_WAP_consents['RecordNumber'], discharge_consents['RecordNumber']])
     all_consents.drop_duplicates(inplace=True)
     SWAZ_WAP_consents = None; del SWAZ_WAP_consents
-    
+
     #-Get all the consents from the F_ACC_Permit table from the DataWarehouse that are part of the all_consents selection
-    df = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'F_ACC_Permit', col_names = ['B1_ALT_ID','fmDate','toDate','toDateText','Given Effect To','Expires','OriginalRecord','ParentAuthorisations','ChildAuthorisations','HolderAddressFullName'], where_col={'B1_ALT_ID': all_consents.values})
+    df = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'F_ACC_Permit', col_names = ['B1_ALT_ID','fmDate','toDate','toDateText','Given Effect To','Expires','OriginalRecord','ParentAuthorisations','ChildAuthorisations','HolderAddressFullName'], where_in={'B1_ALT_ID': all_consents.tolist()})
     df['toDate'] = pd.to_datetime(df['toDate'], errors='coerce')
     df['fmDate'] = pd.to_datetime(df['fmDate'], errors='coerce')
     df['Given Effect To'] = pd.to_datetime(df['Given Effect To'], errors='coerce')
     df['Expires'] = pd.to_datetime(df['Expires'], errors='coerce')
-    
+
     #-Select consents that were active between sdate and edate
-    print 'Filter consents that were active between %s and %s...' %(sdate.strftime('%d-%m-%Y'), edate.strftime('%d-%m-%Y'))
+    print('Filter consents that were active between %s and %s...' %(sdate.strftime('%d-%m-%Y'), edate.strftime('%d-%m-%Y')))
     df1 = df.loc[(df['toDate']>pd.Timestamp(sdate)) & (df['fmDate']<=pd.Timestamp(edate))]
     #-If 'Given Effect To' date is later than 'toDate', then consent was never active in between the fmDate-toDate period, and is therefore removed from the dataframe
     df1.loc[(df1['Given Effect To'] > df1['toDate']),:]=np.nan
     df2 = df1.dropna(how='all')
+    df2 = df2.loc[pd.notna(df2['Given Effect To'])]
     #-If 'Given Effect To' date is later than 'fmDate', then the 'fmDate' field is set to 'Given Effect To'
-    df2.loc[(df2['fmDate'] < df2['Given Effect To']),['fmDate']]=  df2['Given Effect To']
-    
+    df2.loc[(df2['fmDate'] < df2['Given Effect To']),'fmDate']=  df2['Given Effect To']
+
     #-Unique consent numbers of 'OriginalRecord'
     ori_records = pd.unique(df2['OriginalRecord'])
     df2_columns = list(df2.columns)
@@ -166,46 +176,68 @@ def get_CRC_DB(config):
     #-get rid of old dataframes
     df = df2.copy()
     df1 = None; df2 = None; del df1, df2
-    
+
     #-For consents that are active for one day, the toDate may now (because of extracting one day from toDate) be smaller than fmDate. Those records are removed
     df = df.loc[df['toDate']>=df['fmDate']]
-    
+
     df = df[['B1_ALT_ID','fmDate','toDate','Given Effect To','HolderAddressFullName']] #-This dataframe contains all take, divert, and discharge consents for the specified period within the selected SWAZs
     df.rename(columns={'B1_ALT_ID': 'crc'}, inplace=True)
+
     #-it may be the case that given effect is empty because consent was never activated. This results in empty cells for 'Given Effect To'. These are dropped.
     df.dropna(inplace=True)
     #-drop discharge consents not part of the df
-    discharge_consents = discharge_consents.loc[discharge_consents['RecordNo'].isin(df['crc'])]
-    
+    discharge_consents = discharge_consents.loc[discharge_consents['RecordNumber'].isin(df['crc'])]
+
     #-Get dataframe of all water takes and diverts on consent level
-    print 'Retrieve take and divert info on consent level...'
-    crcAllo = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterConsent', 
-                                 col_names = ['RecordNo', 'Activity', 'B1_PER_ID3', 'Consented Annual Volume (m3/year)','Combined Annual Volume', 'Complex Allocation',
-                                              'Has a low flow restriction condition?'],
-                                 where_col={'RecordNo': df['crc']})
-    crcAllo.rename(columns={'RecordNo': 'crc', 'Consented Annual Volume (m3/year)': 'crc_ann_vol [m3]', 'Combined Annual Volume': 'crc_ann_vol_combined [m3]',
-                            'Complex Allocation': 'complex_allo', 'Has a low flow restriction condition?': 'lowflow_restriction'}, inplace=True)
-    #-Consents with consented annual volume of 0 are incorrect. An annual volume of 0 is not possible, and should be interpreted as no annual volume is present in the consent conditions.
-    #-These values are therefore replaced with NaNs. Same is true for consented annual combined volumes.
-    crcAllo.loc[crcAllo['crc_ann_vol [m3]']==0,'crc_ann_vol [m3]']=np.nan
-    crcAllo.loc[crcAllo['crc_ann_vol_combined [m3]']==0,'crc_ann_vol_combined [m3]']=np.nan
-    #-change yes/no, to 1/0
-    crcAllo.replace({'complex_allo': yes_no_dict, 'lowflow_restriction': yes_no_dict},inplace=True)
-    #-consents for which complex_allo and lowflow_restriction have no value specified, it is assumed that these conditions are false and therefore set to 0.
+    print('Retrieve take and divert info on consent level...')
+    # Get the surface and groundwater takes for the selected consent numbers
+    crcAllo1 = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterPermitAuthorisation', 
+                                 col_names = ['RecordNumber', 'Activity', 'B1_PER_ID3', 'ConsentedAnnualVolume_m3year', 'ComplexAllocations',
+                                              'HasAlowflowRestrictionCondition'], where_in={'RecordNumber': df['crc'].tolist()})
+    crcAllo1.drop_duplicates(inplace=True)
+
+    # Do the same for the diversions. For the diversions also the wap maximum rate (MaxRate_ls), wap max volume pro rata (Volume_m3), and wap return period (ConsecutiveDayPeriod) are extracted.
+    crcAllo2 = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_DivertWater_Water', col_names = ['RecordNumber', 'Activity', 'B1_PER_ID3', 'HasAlowflowRestrictionCondition', 'WAP', 'MaxRate_ls', 'Volume_m3', 'ConsecutiveDayPeriod'], where_in = {'RecordNumber': df['crc'].tolist()})
+    crcAllo2.drop_duplicates(inplace=True)
+
+    # Concat together
+    crcAllo = pd.concat([crcAllo1, crcAllo2], axis=0)
+    crcAllo1 = None; crcAllo2 = None;
+    # Get combined annual volume
+    combVol = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_AssociatedPermits', col_names = ['RecordNumber', 'CombinedAnnualVol_m3'], where_in={'RecordNumber': df['crc'].tolist()})
+    crcAllo = pd.merge(crcAllo, combVol, how='left', on='RecordNumber')
+    combVol = None
+    # Cleanup
+    crcAllo.drop_duplicates(inplace=True)
+    crcAllo.loc[crcAllo['ConsentedAnnualVolume_m3year'] == 0, 'ConsentedAnnualVolume_m3year'] = np.nan
+    crcAllo.loc[crcAllo['CombinedAnnualVol_m3'] == 0, 'CombinedAnnualVol_m3'] = np.nan
+    crcAllo.rename(columns={'RecordNumber': 'crc', 'ConsentedAnnualVolume_m3year': 'crc_ann_vol [m3]', 'CombinedAnnualVol_m3': 'crc_ann_vol_combined [m3]',
+                            'ComplexAllocations': 'complex_allo', 'HasAlowflowRestrictionCondition': 'lowflow_restriction', 'MaxRate_ls': 'wap_max_rate [l/s]',
+                            'Volume_m3': 'wap_max_vol_pro_rata [m3]', 'ConsecutiveDayPeriod': 'wap_return_period [d]', 'WAP': 'wap'}, inplace=True)
+    # change yes/no, to 1/0
+    crcAllo.replace({'complex_allo': yes_no_dict, 'lowflow_restriction': yes_no_dict}, inplace=True)
+    crcAllo['complex_allo_comment'] = crcAllo['complex_allo']
+    crcAllo.loc[crcAllo['complex_allo'] != 0, 'complex_allo'] = 1
+    crcAllo.loc[crcAllo['complex_allo_comment'] == 0, 'complex_allo_comment'] = np.nan
+
+    # consents for which complex_allo and lowflow_restriction have no value specified, it is assumed that these conditions are false and therefore set to 0.
     crcAllo.loc[pd.isna(crcAllo['complex_allo']),'complex_allo'] = 0
     crcAllo.loc[pd.isna(crcAllo['lowflow_restriction']),'lowflow_restriction'] = 0
-    
+    crcAllo['wap'] = crcAllo['wap'].str.upper()
+
     #-Get dataframe of all water takes and diverts on WAP level
-    print 'Retrieve take and divert info on WAP level...'
-    crcWapAllo = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterWAPAlloc',
-                                    col_names = ['RecordNo', 'Activity', 'From Month', 'To Month', 'Allocation Block', 'WAP', 'Max Rate for WAP (l/s)', 
-                                                 'Max Rate Pro Rata (l/s)', 'Max Vol Pro Rata (m3)', 'Consecutive Day Period', 'Include in SW Allocation?', 'First Stream Depletion Rate'],
-                                    where_col={'RecordNo': df['crc'], 'WAP': SWAZ_WAPs['WellNo']})
-    crcWapAllo.rename(columns={'RecordNo': 'crc', 'Allocation Block': 'allo_block', 'WAP': 'wap', 'Max Rate for WAP (l/s)': 'wap_max_rate [l/s]', 'From Month': 'from_month',
-                               'To Month': 'to_month', 'Max Rate Pro Rata (l/s)': 'wap_max_rate_pro_rata [l/s]', 'Max Vol Pro Rata (m3)': 'wap_max_vol_pro_rata [m3]',
-                               'Consecutive Day Period': 'wap_return_period [d]', 'Include in SW Allocation?': 'in_sw_allo', 'First Stream Depletion Rate': 'first_sd_rate [l/s]'}, inplace=True)
+    print('Retrieve take and divert info on WAP level...')
+    crcWapAllo = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterWAPAllocation',
+                                    col_names = ['RecordNumber', 'Activity', 'FromMonth', 'ToMonth', 'SWAllocationBlock', 'WAP', 'MaxRateForWAP_ls', 
+                                                 'AllocationRate_ls', 'CustomVol_m3', 'CustomPeriodDays', 'IncludeInSWAllocation', 'FirstStreamDepletionRate'],
+                                    where_in={'RecordNumber': df['crc'].tolist(), 'WAP': SWAZ_WAPs['WellNo'].tolist()})
+
+    crcWapAllo.rename(columns={'RecordNumber': 'crc', 'SWAllocationBlock': 'allo_block', 'WAP': 'wap', 'MaxRateForWAP_ls': 'wap_max_rate [l/s]', 'FromMonth': 'from_month',
+                               'ToMonth': 'to_month', 'AllocationRate_ls': 'wap_max_rate_pro_rata [l/s]', 'CustomVol_m3': 'wap_max_vol_pro_rata [m3]',
+                               'CustomPeriodDays': 'wap_return_period [d]', 'IncludeInSWAllocation': 'in_sw_allo', 'FirstStreamDepletionRate': 'first_sd_rate [l/s]'}, inplace=True)
+
     #-A few waps were not in capitals, which results in errors in joins later on. Therefore all waps were capitalized
-    crcWapAllo['wap'] = map(lambda x: x.upper(), crcWapAllo['wap'])
+    crcWapAllo['wap'] = crcWapAllo['wap'].str.upper()
     crcWapAllo.replace({'from_month': month_dict, 'to_month': month_dict},inplace=True)
     #-if wap max pro rata volume is specified, but the return period itself not, then assume return period equals 1
     crcWapAllo.loc[(crcWapAllo['wap_max_vol_pro_rata [m3]']>0) & pd.isna(crcWapAllo['wap_return_period [d]']), 'wap_return_period [d]'] = 1
@@ -213,25 +245,22 @@ def get_CRC_DB(config):
     crcWapAllo.loc[(crcWapAllo['wap_max_rate [l/s]']==0) & (crcWapAllo['wap_max_rate_pro_rata [l/s]']==0),:] = np.nan
     #-WAPs where wap_max_vol_pro_rata and wap_return_period are 0 are set to NaN
     crcWapAllo.loc[(crcWapAllo['wap_max_vol_pro_rata [m3]']==0) & (crcWapAllo['wap_return_period [d]']==0),['wap_max_vol_pro_rata [m3]', 'wap_return_period [d]']] = np.nan
-    
-    
     crcWapAllo.dropna(how='all', inplace=True)
     #-Replace yes/no in in_sw_allo with 1/0
-    crcWapAllo.replace({'in_sw_allo': yes_no_dict},inplace=True)
-    
-    #-Get Max Rate, Volume and return period on consent level
-    print 'Retrieve max rate, volume, and return period on consent level...'
-    crcActWaterUse = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_ACC_Act_Water_UseWater',
-                                        col_names=['RecordNo', 'Max Rate (l/s)', 'Volume (m3)', 'Consecutive Day Period', 'Use'],
-                                        where_col = {'RecordNo': df['crc']})
-    crcActWaterUse.rename(columns={'RecordNo': 'crc', 'Max Rate (l/s)': 'crc_max_rate [l/s]', 'Volume (m3)': 'crc_vol_return_period [m3]', 'Consecutive Day Period': 'crc_return_period [d]'}, inplace=True)
+    crcWapAllo.replace({'in_sw_allo': yes_no_dict}, inplace=True)
+
+    print('Retrieve max rate, volume, and return period on consent level...')
+    crcActWaterUse = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterPermitUse',
+                                        col_names=['RecordNumber', 'MaxRate_ls', 'Volume_m3', 'ConsecutiveDayPeriod', 'WaterUse'],
+                                        where_in = {'RecordNumber': df['crc'].tolist()})
+    crcActWaterUse.rename(columns={'RecordNumber': 'crc', 'MaxRate_ls': 'crc_max_rate [l/s]', 'Volume_m3': 'crc_vol_return_period [m3]', 'ConsecutiveDayPeriod': 'crc_return_period [d]', 'WaterUse': 'Use'}, inplace=True)
     #-some consents have a crc_max_rate of '0', which is not possible. These are set to NaN
     crcActWaterUse.loc[crcActWaterUse['crc_max_rate [l/s]']=='0', 'crc_max_rate [l/s]'] = np.nan
     #-if return period volume is specified, but the return period itself not, then assume return period equals 1
     crcActWaterUse.loc[(crcActWaterUse['crc_vol_return_period [m3]']>0) & pd.isna(crcActWaterUse['crc_return_period [d]']), 'crc_return_period [d]'] = 1
 
     #-merge selected consents with WAPs (takes and diverts)
-    print 'Merge details on WAP level...'
+    print('Merge details on WAP level...')
     df1 = pd.merge(df, crcWapAllo, how='left', on='crc')
     #-Assign discharge to the blank take_types
     df1.loc[pd.isna(df1['Activity']),'Activity'] = 'Discharge water to water'
@@ -239,14 +268,14 @@ def get_CRC_DB(config):
     df1.loc[df1['Activity']=='Discharge water to water','from_month'] = 1
     df1.loc[df1['Activity']=='Discharge water to water','to_month'] = 12
     crcWapAllo = None; df = None; del crcWapAllo, df
-    
+    df1.loc[df1['Activity'] == 'Take Surface Water', 'first_sd_rate [l/s]'] = np.nan
+
     #-get discharge consent conditions and merge
-    print 'Get discharge consent details and merge...'
-    df_discharge = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_ACC_Act_Discharge_ContaminantToWater', col_names = ['RecordNo', 'Discharge Rate (l/s)', 'Max Rate (l/s)', 'Volume (m3)'], where_col = {'RecordNo': discharge_consents['RecordNo']})
-    df_discharge.rename(columns={'Discharge Rate (l/s)': 'discharge_rate [l/s]', 'Max Rate (l/s)': 'discharge_max_rate [l/s]', 'Volume (m3)': 'discharge_volume [m3]'}, inplace=True)
-    #-drop discharge_max_rate because it only contains NaNs
-    df_discharge.drop('discharge_max_rate [l/s]', axis=1, inplace=True)
+    print('Get discharge consent details and merge...')
+    df_discharge = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Discharge_ContaminantToWater', col_names = ['RecordNo', 'Discharge Rate (l/s)', 'Volume (m3)'], where_in = {'RecordNo': discharge_consents['RecordNumber'].tolist()})
+    df_discharge.rename(columns={'Discharge Rate (l/s)': 'discharge_rate [l/s]', 'Volume (m3)': 'discharge_volume [m3]'}, inplace=True)
     #-if rates and/or volumes are zero or missing, then drop rows
+    
     df_discharge.loc[((df_discharge['discharge_rate [l/s]']==0) & (df_discharge['discharge_volume [m3]']==0)) | (pd.isna(df_discharge['discharge_rate [l/s]']) & (df_discharge['discharge_volume [m3]']==0)) |
                      ((df_discharge['discharge_rate [l/s]']==0) & pd.isna(df_discharge['discharge_volume [m3]'])),:] = np.nan
     #-if rates is specified, but volume not, or visa versa, then calculate volume based on rate or rate based on volume
@@ -254,19 +283,37 @@ def get_CRC_DB(config):
     df_discharge.loc[((df_discharge['discharge_volume [m3]']==0) | pd.isna(df_discharge['discharge_volume [m3]'])) & (df_discharge['discharge_rate [l/s]']>0),'discharge_volume [m3]'] = df_discharge['discharge_rate [l/s]'] * 86.4
     df_discharge.loc[df_discharge['discharge_volume [m3]']<0, 'discharge_volume [m3]'] = np.nan
     df_discharge.loc[df_discharge['discharge_rate [l/s]']<0, 'discharge_rate [l/s]'] = np.nan
-    
+    df_discharge = df_discharge.loc[df_discharge['discharge_rate [l/s]']!=0]
     df_discharge.dropna(how='all', inplace=True)
     #-merge with discharge consent locations and WAPs df
-    df_discharge = pd.merge(df_discharge, discharge_consents, how='left', on='RecordNo')
+    df_discharge = pd.merge(df_discharge, discharge_consents, how='left', left_on='RecordNo', right_on='RecordNumber')
     df_discharge.drop_duplicates(subset=['RecordNo', 'discharge_rate [l/s]', 'discharge_volume [m3]'], inplace=True)
-    
+    df_discharge.drop('RecordNo', axis=1, inplace=True)
+
     #-merge df1 with discharge consents
-    df1 = pd.merge(df1, df_discharge, how='left', left_on='crc', right_on='RecordNo')
+    df1 = pd.merge(df1, df_discharge, how='left', left_on='crc', right_on='RecordNumber')
     discharge_consents = None; df_discharge = None; del discharge_consents, df_discharge
-    df1.drop('RecordNo', axis=1, inplace=True)
+    df1.drop('RecordNumber', axis=1, inplace=True)
     df1.loc[(pd.isna(df1['discharge_NZTMX'])) & (pd.isna(df1['discharge_NZTMX'])) & (df1['Activity']=='Discharge water to water'),:] = np.nan
     df1.dropna(how='all', inplace=True)
-    
+
+    # merge consent level dataframe that includes the diversion data
+    diversions = crcAllo.loc[crcAllo.Activity == 'Divert Surface Water']
+    df1 = pd.concat([df1, diversions[['crc', 'Activity', 'wap', 'wap_max_rate [l/s]', 'wap_max_vol_pro_rata [m3]', 'wap_return_period [d]']]], axis=0)
+    diversions = None
+    crcAllo.drop(['wap', 'wap_max_rate [l/s]', 'wap_max_vol_pro_rata [m3]', 'wap_return_period [d]'], axis=1, inplace=True)
+    # copy missing blanks
+    crc_unique = pd.unique(df1.crc).tolist()
+    for c in crc_unique:
+        df_sel = df1.loc[(df1.crc == c) & pd.notna(df1.fmDate)]
+        df1.loc[(df1.crc == c) & (df1.Activity == 'Divert Surface Water'), 'fmDate'] = df_sel.fmDate.iloc[0]
+        df1.loc[(df1.crc == c) & (df1.Activity == 'Divert Surface Water'), 'toDate'] = df_sel.toDate.iloc[0]
+        df1.loc[(df1.crc == c) & (df1.Activity == 'Divert Surface Water'), 'Given Effect To'] = df_sel['Given Effect To'].iloc[0]
+        df1.loc[(df1.crc == c) & (df1.Activity == 'Divert Surface Water'), 'HolderAddressFullName'] = df_sel['HolderAddressFullName'].iloc[0]
+    # Assume empty fields for from_month and to_month are from 1 to 12
+    df1.loc[pd.isna(df1.from_month), 'from_month'] = 1
+    df1.loc[pd.isna(df1.to_month), 'to_month'] = 12
+
     #-merge take and divert consents SWAZs
     df1 = pd.merge(df1, SWAZ_WAPs[['WellNo','SWAZ']], how='left', left_on='wap', right_on='WellNo')
     df1.drop('WellNo', axis=1, inplace=True)
@@ -274,82 +321,90 @@ def get_CRC_DB(config):
     df1.loc[pd.isna(df1['SWAZ_x']), 'SWAZ'] = df1['SWAZ_y']
     df1.loc[pd.isna(df1['SWAZ_y']), 'SWAZ'] = df1['SWAZ_x']
     df1.drop(['SWAZ_x', 'SWAZ_y'], axis=1, inplace=True)
-    
+    df1['wap'] = df1['wap'].astype(str)
+    waps = pd.unique(df1['wap'])
+
     #-add the WAP NZTMX and NZTMY
-    extsite_df = pdsql.mssql.rd_sql('sql2012test01', 'Hydro', 'ExternalSite', col_names = ['ExtSiteID', 'NZTMX', 'NZTMY'], where_col = {'ExtSiteID': df1['wap']})
+    extsite_df = pdsql.mssql.rd_sql('edwprod01', 'Hydro', 'ExternalSite', col_names = ['ExtSiteID', 'NZTMX', 'NZTMY'], where_in = {'ExtSiteID': waps.tolist()})
     extsite_df.rename(columns={'NZTMX': 'wap_NZTMX', 'NZTMY': 'wap_NZTMY'}, inplace=True)
+    extsite_df.drop_duplicates(inplace=True)
     df1 = pd.merge(df1, extsite_df, how='left', left_on='wap', right_on='ExtSiteID')
     df1.drop('ExtSiteID', axis=1, inplace=True)
     extsite_df = None; del extsite_df
-    
+    df1.loc[df1.wap =='nan', 'wap'] = np.nan
+
     #-get stream depletion info and merge with df1
-    print 'Get stream depletion details and merge...'
+    print('Get stream depletion details and merge...')
     waps = pd.unique(df1.loc[df1['Activity']=='Take Groundwater','wap'])
-    sd_df = pdsql.mssql.rd_sql('sql2012prod05', 'Wells', 'Well_StreamDepletion_Locations', col_names = ['Well_No', 'NZTMX', 'NZTMY','Distance','T_Estimate','S'], where_col = {'Well_No': waps})
+    sd_df = pdsql.mssql.rd_sql('sql03prod', 'Wells', 'Well_StreamDepletion_Locations', col_names = ['Well_No', 'NZTMX', 'NZTMY','Distance','T_Estimate','S'], where_in = {'Well_No': waps.tolist()})
     waps = None; del waps
     sd_df.rename(columns={'Well_No': 'wap', 'NZTMX': 'wap_sd_NZTMX', 'NZTMY': 'wap_sd_NZTMY'}, inplace=True)
 
     sd_df.set_index('wap', inplace=True)
     #-calculate Connectivity using one day of pumping (because model runs on a day-to-day basis)
     pump_days = 1
-#     sd_df['Pump days'] = pump_days
-#     sd_df['SDF'] = np.nan
     sd_df['Connection'] = np.nan
     for i in sd_df.iterrows():
         distance, T, S = i[1]['Distance'], i[1]['T_Estimate'], i[1]['S']
         y = Theis(T, S, distance, 0, pump_days)
-        #sdf = y[0]
         connection = y[1]
-        #sd_df.loc[i[0],'SDF'] = sdf
         sd_df.loc[i[0],'Connection'] = connection
     sd_df.reset_index(inplace=True)
-#     df1 = pd.merge(df1, sd_df[['wap', 'wap_sd_NZTMX', 'wap_sd_NZTMY', 'SDF', 'Connection']], how='left', on='wap')
     df1 = pd.merge(df1, sd_df[['wap', 'wap_sd_NZTMX', 'wap_sd_NZTMY', 'Distance','T_Estimate','S', 'Connection']], how='left', on='wap')
     sd_df = None; del sd_df
-    
+
     #-merge consent level dataframe
     df1 = pd.merge(df1, crcAllo, how='left', on=['crc','Activity'])
     crcAllo = None; del crcAllo
-    
+
     #-check for associated consents and add to df1
-    print 'Get associated consents, and add these as a list of comma-separated consent numbers...'
+    print('Get associated consents, and add these as a list of comma-separated consent numbers...')
+    df1['B1_PER_ID3'] = df1['B1_PER_ID3'].astype(str)
     unique_B1_PER_ID3 = pd.unique(df1['B1_PER_ID3'])
-    ass_crc_df = pdsql.mssql.rd_sql('sql2012prod03', 'DataWarehouse', 'D_ACC_Act_AssociatedPermits', col_names = ['B1_PER_ID3', 'Record Number'], where_col = {'B1_PER_ID3': unique_B1_PER_ID3})
+    ass_crc_df = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_AssociatedPermits', col_names = ['B1_PER_ID3', 'RecordNumber','RecordNumberASIT'], where_in = {'B1_PER_ID3': unique_B1_PER_ID3.tolist()})
     df1['associated_crcs'] = np.nan
     for i in unique_B1_PER_ID3:
         crc_list = ''
-        ass_crc = ass_crc_df.loc[ass_crc_df['B1_PER_ID3'] == i, 'Record Number'].values
-        if len(ass_crc)>0:
+        ass_crc = ass_crc_df.loc[ass_crc_df['B1_PER_ID3'] == i, 'RecordNumberASIT'].values
+        if len(ass_crc) > 0:
             for j in ass_crc:
-                crc_list+=j
+                crc_list += j
                 if j != ass_crc[-1]:
-                    crc_list+=', '
-            df1.loc[df1['B1_PER_ID3']==i, 'associated_crcs'] = crc_list
+                    crc_list += ', '
+            df1.loc[df1['B1_PER_ID3'] == i, 'associated_crcs'] = crc_list
     unique_B1_PER_ID3 = None; ass_crc = None; del unique_B1_PER_ID3, ass_crc
-    
+
     #-add crcActWaterUse
     df1 = pd.merge(df1, crcActWaterUse, how='left', on='crc')
     crcActWaterUse = None; del crcActWaterUse
-    
-    #-Mike's allo table for water use and irrigated area
-    print 'Merging water use type and irrigated area...'
-    hydro_crc_allo_df = pdsql.mssql.rd_sql('sql2012test01', 'Hydro', 'CrcAllo', col_names = ['crc', 'take_type', 'use_type', 'irr_area'], where_col = {'crc': df1['crc']})
-    hydro_crc_allo_df.rename(columns={'irr_area': 'irr_area [ha]'}, inplace=True)
+
+    #-Mike's allo table for water use
+    print('Merging water use type and irrigated area...')
+    hydro_crc_allo_df = pdsql.mssql.rd_sql('edwprod01', 'Hydro', 'CrcAllo', col_names = ['crc', 'take_type', 'use_type'], where_in = {'crc': df1['crc'].tolist()})
     df1 = pd.merge(df1, hydro_crc_allo_df, how='left', left_on=['crc', 'Activity'], right_on=['crc', 'take_type'])
     df1.drop('take_type', axis=1, inplace=True)
     hydro_crc_allo_df = None; del hydro_crc_allo_df
-    
+    df1.drop_duplicates(inplace=True)
+    df1.loc[pd.isna(df1['use_type']), 'use_type'] = df1['Use']
+    df1.drop('Use', axis=1, inplace=True)
+
     #-get metered data in [m3]
-    print 'Merging info on water meters...'
+    print('Merging info on water meters...')
     df1['metered'] = np.nan
     df1['metered_fmDate'] = np.nan
     df1['metered_toDate'] = np.nan
-    waps = pd.unique(df1['wap'])
+    df1['wap'] = df1['wap'].astype(str)
+    waps = list(pd.unique(df1['wap']))
+    new_waps = []
+    for w in waps:
+        if '/' in w:
+            new_waps.append(w)
+    waps = new_waps; new_waps = None; 
     nrWaps = len(waps)
     df_meter = pd.DataFrame(index=pd.date_range(sdate, edate, freq='D'), columns=waps)
     df_meter.rename_axis('Date', inplace=True)
     #-get the wap abstraction data for rivers (9) and aquifer (12) for the waps present in the df1
-    df = pdsql.mssql.rd_sql('sql2012test01', 'Hydro', 'TSDataNumericDaily', col_names = ['ExtSiteID', 'DatasetTypeID', 'DateTime', 'Value'], where_col = {'ExtSiteID': df1['wap'], 'DatasetTypeID': [9, 12]})
+    df = pdsql.mssql.rd_sql('edwprod01', 'Hydro', 'TSDataNumericDaily', col_names = ['ExtSiteID', 'DatasetTypeID', 'DateTime', 'Value'], where_in = {'ExtSiteID': waps, 'DatasetTypeID': [9, 12]})
     df['DateTime'] = pd.to_datetime(df['DateTime'])
     df = df.loc[(df['DateTime']>=pd.Timestamp(sdate)) & (df['DateTime']<=pd.Timestamp(edate))]
     df.rename(columns={'DateTime': 'Date'}, inplace=True)
@@ -377,46 +432,50 @@ def get_CRC_DB(config):
         except:
             lMessage = w + ' has multiple DatasetTypeIDs assigned to it. This is not possible and needs to be checked; i.e. a WAP can not be a divert and surface water take at the same time!!'
             lMessageList.append(lMessage) 
-            print lMessage
+            print(lMessage)
             #-use the first occuring entry two prevent double datasettypeids
             df_sel.reset_index(inplace=True)
             df_sel = df_sel.groupby('Date').first()
             df_meter[[w]] = df_sel
     percMetered = (nrMeteredWaps / nrWaps) * 100
     lMessage = '%.2f%% of the WAPs is metered.' %(percMetered)
-    print lMessage
+    print(lMessage)
     lMessageList.append(lMessage)
     
     #-write WAP meter time-series to csv-file
-    print 'Writing metered time-series of WAPs to csv-file...'
+    print('Writing metered time-series of WAPs to csv-file...')
     df_meter.reset_index(inplace=True)
     df_meter['Date'] = df_meter['Date'].dt.strftime('%d/%m/%Y')
     df_meter.set_index('Date', inplace=True)
     df_meter = df_meter.loc[:, df_meter.columns.notnull()]
     df_meter.to_csv(wapTS_csv_out)
-   
+
     #-write final dataframe to csv-file
-    print 'Writing final consent/WAP/details dataframe to csv-file...'
+    print('Writing final consent/WAP/details dataframe to csv-file...')
     df1.drop_duplicates(inplace=True)
-    
+
     ###-re-organize order of columns
-    df_final = df1[['crc', 'fmDate', 'toDate', 'Given Effect To', 'HolderAddressFullName', 'Activity', 'use_type', 'irr_area [ha]', 'from_month', 'to_month', 'SWAZ',
-                'in_sw_allo', 'allo_block', 'complex_allo', 'crc_ann_vol [m3]', 'crc_ann_vol_combined [m3]', 'crc_vol_return_period [m3]', 'crc_return_period [d]',
-                'crc_max_rate [l/s]', 'associated_crcs', 'B1_PER_ID3', 'wap', 'wap_max_rate [l/s]', 'wap_max_rate_pro_rata [l/s]', 'wap_max_vol_pro_rata [m3]',
+    df_final = df1[['crc', 'fmDate', 'toDate', 'Given Effect To', 'HolderAddressFullName', 'Activity', 'use_type', 'from_month', 'to_month', 'SWAZ',
+                'in_sw_allo', 'allo_block', 'complex_allo', 'complex_allo_comment', 'crc_ann_vol [m3]', 'crc_ann_vol_combined [m3]', 'crc_vol_return_period [m3]', 'crc_return_period [d]',
+                'crc_max_rate [l/s]', 'associated_crcs', 'wap', 'wap_max_rate [l/s]', 'wap_max_rate_pro_rata [l/s]', 'wap_max_vol_pro_rata [m3]',
                 'wap_return_period [d]', 'wap_NZTMX', 'wap_NZTMY', 'wap_sd_NZTMX', 'wap_sd_NZTMY', 'Distance', 'T_Estimate','S', 'Connection', 'discharge_rate [l/s]',
                 'discharge_volume [m3]', 'discharge_NZTMX', 'discharge_NZTMY', 'metered', 'metered_fmDate', 'metered_toDate', 'lowflow_restriction']]
     df_final.loc[pd.isna(df_final['complex_allo']),'complex_allo'] = 0
     df_final.loc[pd.isna(df_final['lowflow_restriction']),'lowflow_restriction'] = 0
-    
+    df_final.loc[df_final.Activity == 'Discharge water to water', 'wap'] = np.nan
+
     df1 = None; del df1;
     df_final['fmDate'] = df_final['fmDate'].dt.strftime('%d/%m/%Y')
     df_final['toDate'] = df_final['toDate'].dt.strftime('%d/%m/%Y')
     df_final['Given Effect To'] = df_final['Given Effect To'].dt.strftime('%d/%m/%Y')
     df_final.to_csv(crc_csv_out, index=False)
-        
-    print 'Finished filtering consent and WAP info.'
-  
+
+    print('Finished filtering consent and WAP info.')
+    sys.exit()
+
     return df_final, lMessageList
+
+
 
 
 def get_CRC_CSV(self):    
@@ -551,7 +610,7 @@ def cleanup_crc_df(self):
         self.crc_df.drop('use_type_y', axis=1, inplace=True)
         self.crc_df.rename(columns={'use_type_x': 'use_type' }, inplace=True)
     except:
-        print 'Warning: consumption csv-file not found or not specified. Consumption cannot be set for demand nodes!'
+        print('Warning: consumption csv-file not found or not specified. Consumption cannot be set for demand nodes!')
     #-cleanup
     self.crc_df.drop_duplicates(inplace=True)
     self.crc_df.sort_values(by='crc', inplace=True)
@@ -722,22 +781,22 @@ def add_WAPs_as_nodes(WEAP, crc_df, activity):
     
     selBranches = WEAP.Branch('\Demand Sites and Catchments').Children
     #-clean all existing waps
-    print 'Removing existing WAPs for %s...' %activity
+    print('Removing existing WAPs for %s...' %activity)
     for i in selBranches:
         if i.TypeName == 'Demand Site':
             if (activity == 'Take Surface Water') & ('_SW' in i.Name):
-                print 'Deleted %s' %i.Name
+                print('Deleted %s' %i.Name)
                 i.Delete()
             elif (activity == 'Take Groundwater') & ('_GW' in i.Name):
-                print 'Deleted %s' %i.Name
+                print('Deleted %s' %i.Name)
                 i.Delete()
              
     #-add WAPs (for groundwater take or surface water take)
-    print 'Adding WAPs for %s as demand nodes...' %activity
+    print('Adding WAPs for %s as demand nodes...' %activity)
     c= 0
     for i in crc_df.iterrows():
         ID = i[1]['wap_name']
-        print ID
+        print(ID)
         lon = i[1]['wap_lon']
         lat = i[1]['wap_lat']
         q = None
@@ -758,7 +817,7 @@ def add_WAPs_as_nodes(WEAP, crc_df, activity):
         c=0
         for i in crc_df.iterrows():
             ID = i[1]['wap_name'] + '_SD'
-            print ID
+            print(ID)
             lon = i[1]['wap_sd_lon']
             lat = i[1]['wap_sd_lat']
             q = None
@@ -781,10 +840,10 @@ def add_WAPs_as_nodes(WEAP, crc_df, activity):
         if i.TypeName == 'Demand Site':
             if (activity == 'Take Surface Water') & ('_SW' in i.Name):
                 demandSites.append(i.Name)
-                print '%s was added ' %i.Name
+                print('%s was added ' %i.Name)
             elif (activity == 'Take Groundwater') & ('_GW' in i.Name):
                 demandSites.append(i.Name)
-                print '%s was added ' %i.Name
+                print('%s was added ' %i.Name)
     ids = list(crc_df['wap_name'])
     if activity == 'Take Groundwater':
         ids1 = list(crc_df['wap_name'] + '_SD')
@@ -793,7 +852,7 @@ def add_WAPs_as_nodes(WEAP, crc_df, activity):
     for i in ids:
         ID = i
         if ID not in demandSites:
-            print 'ERROR: %s was not added as Demand node. Needs to be fixed manually.' %ID
+            print('ERROR: %s was not added as Demand node. Needs to be fixed manually.' %ID)
             
     WEAP.SaveArea()            
     WEAP.Verbose=1
@@ -807,16 +866,16 @@ def removeWAPs(WEAP, activity):
     
     selBranches = WEAP.Branch('\Demand Sites and Catchments').Children
     #-clean all existing waps for activity
-    print 'Removing existing WAPs for %s...' %activity
+    print('Removing existing WAPs for %s...' %activity)
     for i in selBranches:
         if i.TypeName == 'Demand Site':
             if (activity == 'Take Surface Water') & ('_SW' in i.Name):
-                print 'Deleted %s' %i.Name
+                print('Deleted %s' %i.Name)
                 i.Delete()
             elif (activity == 'Take Groundwater') & ('_GW' in i.Name):
-                print 'Deleted %s' %i.Name
+                print('Deleted %s' %i.Name)
                 i.Delete()
-    print 'WAPs for %s have been removed.' %activity
+    print('WAPs for %s have been removed.' %activity)
     WEAP.SaveArea()
     
 
@@ -830,7 +889,7 @@ def set_consumption(self):
         branches = self.WEAP.Branch('\\Demand Sites and Catchments').Children
         for br in branches:
             if br.TypeName == 'Demand Site':
-                print 'Setting consumption for %s' %br.Name
+                print('Setting consumption for %s' %br.Name)
                 if '_SD' in br.Name: #-for surface water depletion nodes the consumption is 0%; i.e. 100% is returned to groundwater
                     br.Variables('Consumption').Expression = 0
                 else:
@@ -858,23 +917,23 @@ def init_WAP_KeyAssumptions(self):
     self.keyAssumpBranchWAPsDivertChildList = ['Max daily rate', 'Restriction daily volume', 'Supplied daily volume', 'Non_compliance daily volume'] #-for diverts there is no supplied volume calculated, so therefore 'Streamflow' should be used in the calculations
     #-If WAPs Key Assumption already exists, then remove it and create it again.
     if self.WEAP.BranchExists('\Key Assumptions\WAPs'):
-        print self.WEAP.Branch('\Key Assumptions\WAPs').FullName + ' has been deleted'
+        print(self.WEAP.Branch('\Key Assumptions\WAPs').FullName + ' has been deleted')
         self.WEAP.Branch('\Key Assumptions\WAPs').Delete()
     self.keyAssumpBranchWAPs = self.keyAssumpBranch.AddChild('WAPs')
     self.keyAssumpBranchWAPs.Variables("Annual Activity Level").ScaleUnit = 'm^3'
-    print self.keyAssumpBranchWAPs.FullName + ' branch has been added'
+    print(self.keyAssumpBranchWAPs.FullName + ' branch has been added')
     #-Add Groundwater branch
     self.keyAssumpBranchWAPsGW = self.keyAssumpBranchWAPs.AddChild('Take Groundwater')
     self.keyAssumpBranchWAPsGW.Variables("Annual Activity Level").ScaleUnit = 'm^3'
-    print self.keyAssumpBranchWAPsGW.FullName + ' branch has been added'
+    print(self.keyAssumpBranchWAPsGW.FullName + ' branch has been added')
     #-Add Surface Water branch 
     self.keyAssumpBranchWAPsSW = self.keyAssumpBranchWAPs.AddChild('Take Surface Water')
     self.keyAssumpBranchWAPsSW.Variables("Annual Activity Level").ScaleUnit = 'm^3'
-    print self.keyAssumpBranchWAPsSW.FullName + ' branch has been added'
+    print(self.keyAssumpBranchWAPsSW.FullName + ' branch has been added')
     #-Add Divert Surface Water branch 
     self.keyAssumpBranchWAPsDivert = self.keyAssumpBranchWAPs.AddChild('Divert Surface Water')
     self.keyAssumpBranchWAPsDivert.Variables("Annual Activity Level").ScaleUnit = 'm^3'
-    print self.keyAssumpBranchWAPsDivert.FullName + ' branch has been added'
+    print(self.keyAssumpBranchWAPsDivert.FullName + ' branch has been added')
     
     
     #-Adding WAPs under the Groundwater Water branch
@@ -884,7 +943,7 @@ def init_WAP_KeyAssumptions(self):
     for k in self.keyAssumpBranchWAPsGWChildList:
         b = self.keyAssumpBranchWAPsGW.AddChild(k)
         b.Variables("Annual Activity Level").ScaleUnit = 'm^3'
-        print 'Adding WAPs under ' + b.FullName
+        print('Adding WAPs under ' + b.FullName)
         if k != 'Stream depletion':
             count=0
             for d in df.iterrows():
@@ -908,7 +967,7 @@ def init_WAP_KeyAssumptions(self):
     for k in self.keyAssumpBranchWAPsSWChildList:
         b = self.keyAssumpBranchWAPsSW.AddChild(k)
         b.Variables("Annual Activity Level").ScaleUnit = 'm^3'
-        print 'Adding WAPs under ' + b.FullName
+        print('Adding WAPs under ' + b.FullName)
         count=0
         for d in df.iterrows():
             bb = b.AddChild(d[1]['wap_name'])
@@ -924,7 +983,7 @@ def init_WAP_KeyAssumptions(self):
     for k in self.keyAssumpBranchWAPsDivertChildList:
         b = self.keyAssumpBranchWAPsDivert.AddChild(k)
         b.Variables("Annual Activity Level").ScaleUnit = 'm^3'
-        print 'Adding WAPs under ' + b.FullName
+        print('Adding WAPs under ' + b.FullName)
         count=0
         for d in df.iterrows():
             bb = b.AddChild(d[1]['wap_name'])
@@ -960,15 +1019,15 @@ def init_Consents_OtherAssumptions(self):
             
         #-If Consents Key Assumption already exists, then remove it and create it again.
         if self.WEAP.BranchExists('\Other Assumptions\Consents'):
-            print self.WEAP.Branch('\Other Assumptions\Consents').FullName + ' has been deleted'
+            print(self.WEAP.Branch('\Other Assumptions\Consents').FullName + ' has been deleted')
             self.WEAP.Branch('\Other Assumptions\Consents').Delete()
         self.otherAssumpBranchConsents = self.otherAssumpBranch.AddChild('Consents')
-        print self.otherAssumpBranchConsents.FullName + ' branch has been added'
+        print(self.otherAssumpBranchConsents.FullName + ' branch has been added')
         
         #-Adding consents under the 'Other Assumptions\Consents' Branch
         count=0
         for c in crcs:
-            print 'Adding conditions for %s' %c
+            print('Adding conditions for %s' %c)
             #-Add the consent nr to the 'Other Assumptions\Consents' Branch 
             b = self.otherAssumpBranchConsents.AddChild(c)
 #             b = self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c)
@@ -1124,7 +1183,7 @@ def init_Consents_OtherAssumptions(self):
             br = self.WEAP.Branch('\\Key Assumptions\\WAPs\\' + a + '\\Max daily rate')
             for w in br.Children:
                 wap_name = w.Name
-                print 'Calculating max daily rate for ' + wap_name
+                print('Calculating max daily rate for ' + wap_name)
                 df_sel = self.crc_df.loc[(self.crc_df['wap_name']==wap_name) & (self.crc_df['Activity']==a), ['crc', 'wap_name_long']]
                 expr_str = ''
                 count = 0
@@ -1143,7 +1202,7 @@ def init_Consents_OtherAssumptions(self):
             br = self.WEAP.Branch('\\Key Assumptions\\WAPs\\' + a + '\\Restriction daily volume')
             for w in br.Children:
                 wap_name = w.Name
-                print 'Calculating restriction daily volume for ' + wap_name
+                print('Calculating restriction daily volume for ' + wap_name)
                 df_sel = self.crc_df.loc[(self.crc_df['wap_name']==wap_name) & (self.crc_df['Activity']==a), ['crc', 'wap_name_long']]
                 expr_str = ''
                 count = 0
@@ -1162,7 +1221,7 @@ def init_Consents_OtherAssumptions(self):
             br = self.WEAP.Branch('\\Key Assumptions\\WAPs\\' + a + '\\Non_compliance daily volume')
             for w in br.Children:
                 wap_name = w.Name
-                print 'Calculating non-compliance daily volume for ' + wap_name
+                print('Calculating non-compliance daily volume for ' + wap_name)
                 br1 = self.WEAP.Branch('\\Key Assumptions\\WAPs\\' + a + '\\Restriction daily volume\\' + wap_name).FullName
                 br2 = self.WEAP.Branch('\\Key Assumptions\\WAPs\\' + a + '\\Supplied daily volume\\' + wap_name).FullName
                 self.WEAP.Branch(w.FullName).Variables('Annual Activity Level').Expression = 'Max(0, ' + br2 + '-' + br1 + ')'
@@ -1171,7 +1230,7 @@ def init_Consents_OtherAssumptions(self):
         selBranches = self.WEAP.Branch('\Demand Sites and Catchments').Children
         for i in selBranches:
             if (i.TypeName == 'Demand Site') & ('_SD' not in i.Name):
-                print 'Linking demand for node %s' %i.Name
+                print('Linking demand for node %s' %i.Name)
                 i.Variables('Method').Expression = 'Specify daily demand'
                 if '_SW' in i.Name:
                     i.Variables('Daily Demand').Expression = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Surface Water\\Demand\\' + i.Name).FullName
@@ -1183,10 +1242,10 @@ def init_Consents_OtherAssumptions(self):
                     
 
     else:
-        print 'The branch "Key Assumptions\WAPs" and its children does not exist.'
-        print 'This needs to be added before the "Other Assumptions\Consents" branch' 
-        print 'and its children can be added. Set "create_blanco_WAPs_KA=1" in the'
-        print 'config file.'
+        print('The branch "Key Assumptions\WAPs" and its children does not exist.')
+        print('This needs to be added before the "Other Assumptions\Consents" branch') 
+        print('and its children can be added. Set "create_blanco_WAPs_KA=1" in the')
+        print('config file.')
           
     #         count+=1
     #         if count==5:
@@ -1206,7 +1265,7 @@ def add_supply_delivered(self):
     for a in activity_list:
         waps = self.WEAP.Branch('\\Key Assumptions\\WAPs\\' + a + '\\Supplied daily volume').Children
         for w in waps:
-            print 'Adding supply delivered for %s' %(w.Name)
+            print('Adding supply delivered for %s' %(w.Name))
             br = self.WEAP.Branch(w.FullName)
             if a == 'Divert Surface Water':
                 #br.Variables('Annual Activity Level').Expression = 'PrevTSValue(Supply and Resources\\River\\' + w.Name + ':Streamflow[m^3])'
@@ -1244,7 +1303,7 @@ def calc_restrict_daily_vol(self):
             wap = w[1]['wap']
             wap_name_long = w[1]['wap_name_long']
 
-            print 'Restriction string for %s and %s' %(c, wap)
+            print('Restriction string for %s and %s' %(c, wap))
             
             wap_max_vol_pro_rata = self.WEAP.BranchExists('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Max volume pro rata')
             wap_return_period = self.WEAP.BranchExists('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Return period')
@@ -1367,7 +1426,7 @@ def calc_restrict_daily_vol(self):
                                             self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c_ass + '\\' + wap_name_long_temp + '\\Fraction').FullName + ') + '
                                         restr_str = restr_str + br
                             except:
-                                print 'Associated consent %s has no combined annual volume and is therefore not added to the equation' %c_ass
+                                print('Associated consent %s has no combined annual volume and is therefore not added to the equation' %c_ass)
                                     
                         #-loop over the waps of the main consent
                         #-combined annual volume only applies to takes. Therefore Diverts are left out of the equation for calculating restriction flow.
@@ -1387,7 +1446,7 @@ def calc_restrict_daily_vol(self):
                         restr_str = restr_str + ')'
                     
                     except:
-                        print 'No associated consents found for %s' %c
+                        print('No associated consents found for %s' %c)
             
             #-The final restriction string for the wap
             #restr_str = 'Max(0, ' + restr_str + ' * ' + self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').FullName + ')'
@@ -1418,7 +1477,7 @@ def add_bands_to_crc(self):
             try:
                 band = np.int(w[1]['BandNo'])
                 band = 'band_num_%s' %band
-                print 'Adding Ballocated for %s %s %s' %(c, wap_name_long, band)
+                print('Adding Ballocated for %s %s %s' %(c, wap_name_long, band))
                 band_branch = self.WEAP.Branch('\\Key Assumptions\\Low Flows\\' + LF_site + '\\' + band + '\\Ballocated').FullName
                 self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').Variables('Annual Activity Level').Expression = band_branch
             except:
@@ -1435,14 +1494,14 @@ def set_demand_to_restrict_daily_vol(self):
     br = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Groundwater\\Demand').Children
     for b in br:
         wap = b.Name
-        print 'Setting demand for %s to restriction daily volume' %wap
+        print('Setting demand for %s to restriction daily volume' %wap)
         b.Variables('Annual Activity Level').Expression = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Groundwater\\Restriction daily volume\\' + wap).FullName
         
     #-then surface waps
     br = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Surface Water\\Demand').Children
     for b in br:
         wap = b.Name
-        print 'Setting demand for %s to restriction daily volume' %wap
+        print('Setting demand for %s to restriction daily volume' %wap)
         b.Variables('Annual Activity Level').Expression = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Surface Water\\Restriction daily volume\\' + wap).FullName
     
     self.WEAP.SaveArea()
@@ -1485,14 +1544,14 @@ def set_demand_to_zero(self):
     br = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Groundwater\\Demand').Children
     for b in br:
         wap = b.Name
-        print 'Setting demand for %s to zero' %wap
+        print('Setting demand for %s to zero' %wap)
         b.Variables('Annual Activity Level').Expression = 0
         
     #-then surface waps
     br = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Surface Water\\Demand').Children
     for b in br:
         wap = b.Name
-        print 'Setting demand for %s to zero' %wap
+        print('Setting demand for %s to zero' %wap)
         b.Variables('Annual Activity Level').Expression = 0
     
     self.WEAP.SaveArea()
@@ -1507,13 +1566,13 @@ def set_restriction_on_transmission_links(self):
     for b in br:
         wap = b.Name.split('to ')[1]
         if '_SW' in wap:
-            print 'Setting restriction on transmission link to %s' %wap
+            print('Setting restriction on transmission link to %s' %wap)
             for bb in b.Children:
                 #-note extra space in variable expression below: this is likely a bug in WEAP
                 bb.Variables('Maximum Flow   Volume').Expression = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Surface Water\\Restriction daily volume\\' + wap).FullName + ' /(24*3600)' 
                 #bb.Variables('Maximum Flow   Volume').ScaleUnit = 'm^3'
         elif ('_GW' in wap) & ('_SD' not in wap):
-            print 'Setting restriction on transmission link to %s' %wap
+            print('Setting restriction on transmission link to %s' %wap)
             for bb in b.Children:
                 #-note extra space in variable expression below: this is likely a bug in WEAP
                 bb.Variables('Maximum Flow   Volume').Expression = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Take Groundwater\\Restriction daily volume\\' + wap).FullName  + ' /(24*3600)'
@@ -1528,7 +1587,7 @@ def set_restriction_on_diverts(self):
     br = self.WEAP.Branch('\\Supply and Resources\\River').Children
     for b in br:
         if '_Divert' in b.Name:
-            print 'Setting restriction on divert %s' %b.Name
+            print('Setting restriction on divert %s' %b.Name)
             b.Variables('Maximum Diversion').Expression = self.WEAP.Branch('\\Key Assumptions\\WAPs\\Divert Surface Water\\Restriction daily volume\\' + b.Name).FullName  + ' /(24*3600)'
     self.WEAP.SaveArea()
     
@@ -1539,7 +1598,7 @@ def remove_restriction_from_transmission_links(self):
     br = self.WEAP.Branch('\\Supply and Resources\\Transmission Links').Children
     for b in br:
         wap = b.Name.split('to ')[1]
-        print 'Removing restriction from transmission link %s' %wap
+        print('Removing restriction from transmission link %s' %wap)
         if '_SW' in wap:
             for bb in b.Children:
                 #-note extra space in variable expression below: this is likely a bug in WEAP
@@ -1558,7 +1617,7 @@ def remove_restriction_from_diverts(self):
     br = self.WEAP.Branch('\\Supply and Resources\\River').Children
     for b in br:
         if '_Divert' in b.Name:
-            print 'Removing restriction from %s' %b.Name
+            print('Removing restriction from %s' %b.Name)
             b.Variables('Maximum Diversion').Expression = 0
     self.WEAP.SaveArea()                
 
