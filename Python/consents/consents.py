@@ -19,28 +19,27 @@ __date__ = 'August 2020'
 pd.options.display.max_columns = 100
 
 '''
-***************** TABLES FROM PROD03 - DataWarehouse *********************************************
+***************** TABLES FROM sql02prod - DataWarehouse *********************************************
 
-D_ACC_Act_Water_TakeWaterConsent - Combined annual volume, complex alloaction, has low flow restriction, activity type
-D_ACC_Act_Water_TakeWaterWAPAlloc - Lists all WAPs per consent
-D_ACC_Act_Water_UseWater - Max rates, volumes, and consecutive periods on the consent level
-D_ACC_Act_Discharge_ContaminantToWater - Contains details about discharge consents (e.g. rates) 
-D_ACC_Act_AssociatedPermits - B1_PER_ID3 gives the unqiue identifier for associated consents for combined allocation. Record number gives the associated consent numbers
-D_ACC_ActivityAttribute_DischargeToWater - Contains info about discharge consents
-F_ACC_Permit - Full consent details, including history
-D_SW_WellsDetails - SWAZ
+D_ACC_Act_Water_TakeWaterPermitAuthorisation - RecordNumber, Activity, B1_PER_ID3, ConsentedAnnualVolume_m3year, ComplexAllocations, HasAlowflowRestrictionCondition --> diverts are not part of this table
+D_ACC_Act_Water_DivertWater_Water - RecordNumber, Activity, B1_PER_ID3, HasAlowflowRestrictionCondition, WAP, MaxRate_ls, Volume_m3, ConsecutiveDayPeriod --> only for divers. Surface- and Groundwter takes are part of the table above.
+D_SW_WellsDetails - WellNo, SWAllocationZone, Depth --> filtering on SWAZ and cutoff depth Z
+D_ACC_Act_Water_TakeWaterWAPAllocation - Activity, FromMonth, ToMonth, SWAZ, WAP, MaxRateForWAP_ls, AllocationRate_ls, CustomVol_m3', CustomPeriodDays, IncludeInSWAllocation, FirstStreamDepletionRate
+D_ACC_Act_Water_TakeWaterPermitUse - MaxRate_ls, Volume_m3, ConsecutiveDayPeriod, WaterUse --> on consent level
+D_ACC_Act_Discharge_ContaminantToWater - Discharge Rate (l/s), Volume (m3)
+F_ACC_Permit - B1_ALT_ID, fmDate ,toDate ,toDateText, Given Effect To, Expires, OriginalRecord, ParentAuthorisations, ChildAuthorisations, HolderAddressFullName
+D_ACC_Act_Water_AssociatedPermits - Combined Annual Volume and associated consents.
 
-***************** TABLES FROM PROD05 - Wells *********************************************
+***************** TABLES FROM sql03prod - Wells *********************************************
 
-Well_StreamDepletion_Locations - Stream depletion X and Y
-SCREEN_DETAILS - Details about screen depths (used to filter out topscreens with depth>30m)
+Well_StreamDepletion_Locations - Well_No, NZTMX, NZTMY, Distance, T_Estimate, S
+SCREEN_DETAILS - WELL_NO, TOP_SCREEN --> Details about screen depths (used to filter out topscreens with depth >  Z m)
 
-***************** TABLES FROM HYDRO ******************************************************
+***************** TABLES FROM edwprod01 - Hydro *********************************************
 
-ExternalSite - Coordinates of WAPs
-CrcAll- info on consent level (only use the use_type and irr_area from this table)
+ExternalSite - ExtSiteID (WAP number), NZTMX, NZTMY
+CrcAllo - crc, take_type, use_type
 TSDataNumericDaily - daily time-series values (e.g. abstraction data)
-
 '''
 
 
@@ -471,12 +470,8 @@ def get_CRC_DB(config):
     df_final.to_csv(crc_csv_out, index=False)
 
     print('Finished filtering consent and WAP info.')
-    sys.exit()
 
     return df_final, lMessageList
-
-
-
 
 def get_CRC_CSV(self):    
     '''
