@@ -82,7 +82,7 @@ def get_CRC_DB(config):
     # Dictionary to convert string from month and to month to numbers
     month_dict = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
     # Dictionary to replace Yes/No values with 1,0
-    yes_no_dict = {'Yes': 1, 'No': 0, 'yes': 1, 'no': 0, 'YES': 1, 'NO': 0}
+    yes_no_dict = {'Yes': 1, 'No': 0, 'yes': 1, 'no': 0, 'YES': 1, 'NO': 0, 'Complex': 1}
     # list to add warnings/erros
     lMessageList = []
 
@@ -108,7 +108,6 @@ def get_CRC_DB(config):
     #-First get the wells that have a depth <=Z m
     WAP_depth_Zm = SWAZ_WAPs.loc[(SWAZ_WAPs['Depth']<=well_cutoff_depth) | (pd.isna(SWAZ_WAPs['Depth'])), ['WellNo']]
     #-Get Wells with top_screen <=Z m
-
     WAP_screens = pdsql.mssql.rd_sql('sql03prod', 'Wells', 'SCREEN_DETAILS', col_names = ['WELL_NO', 'TOP_SCREEN'], where_in={'WELL_NO': SWAZ_WAPs['WellNo'].tolist()})
     WAP_screens = WAP_screens.groupby('WELL_NO')['TOP_SCREEN'].min().reset_index()
     WAP_screens = WAP_screens.loc[WAP_screens['TOP_SCREEN'] <= well_cutoff_depth]
@@ -123,11 +122,14 @@ def get_CRC_DB(config):
     WAP_depth_Zm = None; WAP_screens = None; WAP_Zm = None; del WAP_depth_Zm, WAP_screens, WAP_Zm
 
     #-Get all the consents related to the WAPs within the selected SWAZs
-    SWAZ_WAP_consents = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterWAPAllocation', col_names = ['RecordNumber', 'WAP'], where_in={'WAP': list(SWAZ_WAPs['WellNo'])})
+    SWAZ_WAP_consents1 = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_TakeWaterWAPAllocation', col_names = ['RecordNumber', 'WAP'], where_in={'WAP': list(SWAZ_WAPs['WellNo'])})
+    SWAZ_WAP_consents2 = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Water_DivertWater_Water', col_names = ['RecordNumber', 'WAP'], where_in={'WAP': list(SWAZ_WAPs['WellNo'])})
+    SWAZ_WAP_consents = pd.concat([SWAZ_WAP_consents1, SWAZ_WAP_consents2])
     SWAZ_WAP_consents.drop_duplicates(subset='RecordNumber', inplace=True)
+    SWAZ_WAP_consents1 = None; SWAZ_WAP_consents2 = None
     #-Keep only the consents that are a divert or take
     SWAZ_WAP_consents = SWAZ_WAP_consents.loc[SWAZ_WAP_consents['RecordNumber'].isin(all_take_divert_consents['RecordNumber'])]
-  
+
     #-Get all discharge consents located in the catchment of interest
     print('Get discharge consents from csv-file...')
     discharge_consents = pd.read_csv(discharge_consents_csv)
@@ -266,7 +268,7 @@ def get_CRC_DB(config):
     #-from_month and to_month for discharge consents are set from 1 to 12
     df1.loc[df1['Activity']=='Discharge water to water','from_month'] = 1
     df1.loc[df1['Activity']=='Discharge water to water','to_month'] = 12
-    crcWapAllo = None; df = None; del crcWapAllo, df
+    crcWapAllo = None; del crcWapAllo
     df1.loc[df1['Activity'] == 'Take Surface Water', 'first_sd_rate [l/s]'] = np.nan
 
     #-get discharge consent conditions and merge
@@ -274,7 +276,7 @@ def get_CRC_DB(config):
     df_discharge = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_ACC_Act_Discharge_ContaminantToWater', col_names = ['RecordNo', 'Discharge Rate (l/s)', 'Volume (m3)'], where_in = {'RecordNo': discharge_consents['RecordNumber'].tolist()})
     df_discharge.rename(columns={'Discharge Rate (l/s)': 'discharge_rate [l/s]', 'Volume (m3)': 'discharge_volume [m3]'}, inplace=True)
     #-if rates and/or volumes are zero or missing, then drop rows
-    
+
     df_discharge.loc[((df_discharge['discharge_rate [l/s]']==0) & (df_discharge['discharge_volume [m3]']==0)) | (pd.isna(df_discharge['discharge_rate [l/s]']) & (df_discharge['discharge_volume [m3]']==0)) |
                      ((df_discharge['discharge_rate [l/s]']==0) & pd.isna(df_discharge['discharge_volume [m3]'])),:] = np.nan
     #-if rates is specified, but volume not, or visa versa, then calculate volume based on rate or rate based on volume
@@ -298,13 +300,17 @@ def get_CRC_DB(config):
 
     # merge consent level dataframe that includes the diversion data
     diversions = crcAllo.loc[crcAllo.Activity == 'Divert Surface Water']
+    #diversions.to_csv(r'C:\Active\Projects\Ahuriri_Jen\model\data\consents\test\diversions.csv')
     df1 = pd.concat([df1, diversions[['crc', 'Activity', 'wap', 'wap_max_rate [l/s]', 'wap_max_vol_pro_rata [m3]', 'wap_return_period [d]']]], axis=0)
+    # all diverts should have in_sw_allo = 0
+    df1.loc[df1.Activity == 'Divert Surface Water', 'in_sw_allo'] = 0
+
     diversions = None
     crcAllo.drop(['wap', 'wap_max_rate [l/s]', 'wap_max_vol_pro_rata [m3]', 'wap_return_period [d]'], axis=1, inplace=True)
     # copy missing blanks
     crc_unique = pd.unique(df1.crc).tolist()
     for c in crc_unique:
-        df_sel = df1.loc[(df1.crc == c) & pd.notna(df1.fmDate)]
+        df_sel = df.loc[(df.crc == c) & pd.notna(df.fmDate)]
         df1.loc[(df1.crc == c) & (df1.Activity == 'Divert Surface Water'), 'fmDate'] = df_sel.fmDate.iloc[0]
         df1.loc[(df1.crc == c) & (df1.Activity == 'Divert Surface Water'), 'toDate'] = df_sel.toDate.iloc[0]
         df1.loc[(df1.crc == c) & (df1.Activity == 'Divert Surface Water'), 'Given Effect To'] = df_sel['Given Effect To'].iloc[0]
@@ -312,6 +318,7 @@ def get_CRC_DB(config):
     # Assume empty fields for from_month and to_month are from 1 to 12
     df1.loc[pd.isna(df1.from_month), 'from_month'] = 1
     df1.loc[pd.isna(df1.to_month), 'to_month'] = 12
+    df = None; del df
 
     #-merge take and divert consents SWAZs
     df1 = pd.merge(df1, SWAZ_WAPs[['WellNo','SWAZ']], how='left', left_on='wap', right_on='WellNo')

@@ -67,13 +67,9 @@ class WEAP():
         self.processLowFlows()
         #-add consents
         self.processConsents()
-        
-        
-        
+
         #-Run the model
         self.run()
-        
-
     
     def initArea(self):
         '''
