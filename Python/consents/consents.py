@@ -736,10 +736,11 @@ def add_latlon_coordinates(crc_df):
         if activity != 'Discharge water to water':
             x = i[1]['wap_NZTMX']
             y = i[1]['wap_NZTMY']
-            x, y = reproject(2193, 4326, x, y) 
+            x, y = reproject(2193, 4326, x, y)
             crc_df.loc[i[0], 'wap_lat'] = y
             crc_df.loc[i[0], 'wap_lon'] = x
             wap = i[1]['wap']
+            #print(activity, i[1]['crc'], wap)
             wap_name = wap.split('/')
             wap_name = wap_name[0] + '_' + wap_name[1]
             if activity == 'Take Groundwater':

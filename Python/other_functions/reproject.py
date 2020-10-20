@@ -30,6 +30,9 @@ def reproject(src_epsg, dst_epsg, x, y):
     
     transform = osr.CoordinateTransformation(source, target)
     point = ogr.Geometry(ogr.wkbPoint)
-    point.AddPoint(x,y)
+    #point.AddPoint(float(x), float(y))  # check why this has changed, because it used to be the x argument first and then the y argument
+    point.AddPoint(float(y), float(x))
     point.Transform(transform)
-    return point.GetX(), point.GetY()
+
+    return point.GetY(), point.GetX()
+
