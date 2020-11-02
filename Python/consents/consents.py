@@ -1284,6 +1284,8 @@ def calc_restrict_daily_vol(self):
     Adds the algorithm to calculate the restriction daily volume for each unique combination of consent/wap under the 'Other Assumptions\Consents\crc-x\wap-y\Restriction daily volume' branch
     '''
     
+    self.WEAP.Verbose=0
+    
     #-All consents except discharge consents
     df = self.crc_df.loc[self.crc_df['Activity']!='Discharge water to water']
     crcs = pd.unique(df['crc'])
@@ -1373,7 +1375,7 @@ def calc_restrict_daily_vol(self):
                     
             #-check if consent has annual volume
             if crc_ann_vol:
-                crc_ann_vol_value = np.int(self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\Annual volume').Variables('Annual Activity Level').Expression)
+                crc_ann_vol_value = int(float(self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\Annual volume').Variables('Annual Activity Level').Expression))
                 if crc_ann_vol_value>0:
                     restr_str = 'Min(' + restr_str
                     #-consented annual volume only applies to takes. Therefore Diverts are left out of the equation for calculating restriction flow.
@@ -1447,18 +1449,21 @@ def calc_restrict_daily_vol(self):
                             else:
                                 restr_str = restr_str + br + ')'
                         restr_str = restr_str + ')'
-                    
                     except:
                         print('No associated consents found for %s' %c)
             
             #-The final restriction string for the wap
             #restr_str = 'Max(0, ' + restr_str + ' * ' + self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').FullName + ')'
-            ##-Update restriction string carried out on 22 April 2020 --> added "Max daily rate pro rata" to the restriction string
-            pro_rata_str = self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Max daily rate pro rata').FullName
-            restr_str = 'Max(0, Min(' + pro_rata_str + ',' + restr_str + ') * ' + self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').FullName + ')'
+            ##-Update restriction string carried out on 2 November 2020 --> added "Max daily rate pro rata" to the restriction string
+            try:
+                pro_rata_str = self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Max daily rate pro rata').FullName
+                restr_str = 'Max(0, Min(' + pro_rata_str + ',' + restr_str + ') * ' + self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').FullName + ')'
+            except:
+                restr_str = 'Max(0, ' + restr_str + ' * ' + self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').FullName + ')'
             print(restr_str)
             self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Restriction daily volume').Variables('Annual Activity Level').Expression = restr_str
 
+    self.WEAP.Verbose=1
     self.WEAP.SaveArea()
                     
             
@@ -1471,6 +1476,8 @@ def add_bands_to_crc(self):
     #-All consents except discharge consents
     df = self.crc_df.loc[self.crc_df['Activity']!='Discharge water to water']
     crcs = pd.unique(df['crc'])
+    
+    self.WEAP.Verbose=0
      
     for c in crcs:
         #-Get the WAPs belonging to the conent
@@ -1478,14 +1485,17 @@ def add_bands_to_crc(self):
         for w in df_short.iterrows():
             wap_name_long = w[1]['wap_name_long']
             try:
-                band = np.int(w[1]['BandNo'])
+                #band = np.int(w[1]['BandNo'])
+                band = w[1]['BandNo']
                 band = 'band_num_%s' %band
                 print('Adding Ballocated for %s %s %s' %(c, wap_name_long, band))
                 band_branch = self.WEAP.Branch('\\Key Assumptions\\Low Flows\\' + LF_site + '\\' + band + '\\Ballocated').FullName
                 self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').Variables('Annual Activity Level').Expression = band_branch
             except:
+                print('Ballocated for %s %s %s is set to 1' %(c, wap_name_long, band))
                 self.WEAP.Branch('\\Other Assumptions\\Consents\\' + c + '\\' + wap_name_long + '\\Ballocated').Variables('Annual Activity Level').Expression = 1
     
+    self.WEAP.Verbose=1
     self.WEAP.SaveArea()
     
 def set_demand_to_restrict_daily_vol(self):
