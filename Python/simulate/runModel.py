@@ -7,11 +7,9 @@ import datetime as dt
 from groundwater.stream_depletion import *
 
 #-Authorship information-###################################################################
-__author__ = 'Wilco Terink'
-__copyright__ = 'Wilco Terink'
+__copyright__ = 'Environment Canterbury'
 __version__ = '1.0'
-__email__ = 'wilco.terink@ecan.govt.nz'
-__date__ ='August 2020'
+__date__ ='May 2022'
 ############################################################################################
 
 pd.options.display.max_columns = 100
