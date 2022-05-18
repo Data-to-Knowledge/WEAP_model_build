@@ -386,8 +386,13 @@ def get_CRC_DB(config):
     df1 = pd.merge(df1, crcActWaterUse, how='left', on='crc')
     crcActWaterUse = None; del crcActWaterUse
 
-
-
+    #Add BandNo to consents
+    print('Adding BandNo from HydroDB...')
+    bandno_crcs = pdsql.mssql.rd_sql('edwprod01', 'Hydro', 'LowFlowRestrSiteBandCrc', col_names = ['crc', 'band_num', 'site'], where_in = {'crc' : df1['crc'].tolist()})
+    df1 = pd.merge(df1, bandno_crcs, how='left', left_on=['crc'], right_on=['crc'])
+    bandno_crcs = None; del bandno_crcs
+    df1.drop_duplicates(inplace=True)
+    df1.rename(columns={'band_num': 'BandNo'}, inplace=True)
 
     #-Mike's allo table for water use
     print('Merging water use type and irrigated area...')
