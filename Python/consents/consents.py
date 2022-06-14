@@ -98,9 +98,9 @@ def get_CRC_DB(config):
     all_take_consents = None; all_divert_consents = None;
 
     #-Get all the WAPs that are within one of the selected SWAZs from the D_SW_WellsDetails table
-    print('Filtering WAPs located within the selected Surface Water Allocation Zones...')
-    SWAZ_WAPs = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_SW_WellsDetails', col_names = ['WellNo', 'SWAllocationZone', 'Depth'], where_in={'SWAllocationZone': SWAZs})
-    SWAZ_WAPs.rename(columns={'SWAllocationZone':'SWAZ'}, inplace=True)
+    #print('Filtering WAPs located within the selected Surface Water Allocation Zones...')
+    #SWAZ_WAPs = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'D_SW_WellsDetails', col_names = ['WellNo', 'SWAllocationZone', 'Depth'], where_in={'SWAllocationZone': SWAZs})
+    #SWAZ_WAPs.rename(columns={'SWAllocationZone':'SWAZ'}, inplace=True)
 
     # Filter out WAPs that OR have a screen depth <=Z m or a bore depth of <=Z (the or condition is needed because not all Wells have screens).
     # All Depths with NaNs are also considered because these could be WAPs related to diverts
