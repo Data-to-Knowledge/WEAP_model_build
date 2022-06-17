@@ -24,23 +24,24 @@ pd.options.display.max_columns = 10
 D_ACC_Act_Water_TakeWaterPermitAuthorisation - RecordNumber, Activity, B1_PER_ID3, ConsentedAnnualVolume_m3year, ComplexAllocations, HasAlowflowRestrictionCondition --> diverts are not part of this table
 D_ACC_Act_Water_DivertWater_Water - RecordNumber, Activity, B1_PER_ID3, HasAlowflowRestrictionCondition, WAP, MaxRate_ls, Volume_m3, ConsecutiveDayPeriod --> only for diverts. Surface- and Groundwter takes are part of the table above.
 D_SW_WellsDetails - WellNo, SWAllocationZone, Depth --> filtering on SWAZ and cutoff depth Z
-D_ACC_Act_Water_TakeWaterWAPAllocation - Activity, FromMonth, ToMonth, SWAZ, WAP, MaxRateForWAP_ls, AllocationRate_ls, CustomVol_m3', CustomPeriodDays, IncludeInSWAllocation, FirstStreamDepletionRate
-D_ACC_Act_Water_TakeWaterPermitUse - MaxRate_ls, Volume_m3, ConsecutiveDayPeriod, IrrigationArea_ha WaterUse --> on consent level
-D_ACC_Act_Discharge_ContaminantToWater - Discharge Rate (l/s), Volume (m3)
-F_ACC_Permit - B1_ALT_ID, fmDate ,toDate ,toDateText, Given Effect To, Expires, OriginalRecord, ParentAuthorisations, ChildAuthorisations, HolderAddressFullName
-D_ACC_Act_Water_AssociatedPermits - Combined Annual Volume and associated consents.
+D_ACC_Act_Water_TakeWaterWAPAllocation - RecordNumber, WAP, FirstStreamDepletionRate, Activity, FromMonth, ToMonth, SWAllocationBlock, MaxRateForWAP_ls, AllocationRate_ls, CustomVol_m3, CustomPeriodDays, IncludeINSWAllocation
+F_ACC_Permit - B1_ALT_ID, B1_APPL_STATUS, fmDate, toDate, toDateText, Given Effect To, Expires, OriginalRecord, ParentAuthorisations, ChildAuthorisations, HolderAddressFullName
+D_ACC_Act_Water_AssociatedPermits - RecordNumber, CombinedAnnualVol_m3, B1_PER_ID3, RecordNumberASIT
+D_ACC_Act_Water_TakeWaterPermitUse - RecordNumber, MaxRate_ls, Volume_m3, ConsecutiveDayPeriod, IrrigationArea_ha, WaterUse --> on consent level
+D_ACC_Act_Discharge_ContaminantToWater - RecordNo, Discharge Rate (l/s), Volume (m3)
 D_ACC_Act_Water_ConsentWAP - RecordNo, Activity, WaterUse
 
 ***************** TABLES FROM sql03prod - Wells *********************************************
 
-Well_StreamDepletion_Locations - Well_No, NZTMX, NZTMY, Distance, T_Estimate, S
-SCREEN_DETAILS - WELL_NO, TOP_SCREEN --> Details about screen depths (used to filter out topscreens with depth >  Z m)
-WELLS_DETAILS - 
+Well_StreamDepletion_Locations - Well_No, SWAZ_NAME1, NZTMX, NZTMY, Distance, T_Estimate, S
+WELLS_DETAILS - WELL_NO, Depth, NZTMX, NZTMY
 
 ***************** TABLES FROM edwprod01 - Hydro *********************************************
 
 ExternalSite - ExtSiteID (WAP number), NZTMX, NZTMY
 TSDataNumericDaily - daily time-series values (e.g. abstraction data)
+LowFlowRestrSiteBandCrc - crc, band_num, site
+
 '''
 
 #-Run first
