@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+from tracemalloc import stop
 import pandas as pd
 import numpy as np
 import pdsql, os, sys
@@ -38,7 +39,6 @@ WELLS_DETAILS - WELL_NO, Depth, NZTMX, NZTMY
 
 ***************** TABLES FROM edwprod01 - Hydro *********************************************
 
-ExternalSite - ExtSiteID (WAP number), NZTMX, NZTMY
 TSDataNumericDaily - daily time-series values (e.g. abstraction data)
 LowFlowRestrSiteBandCrc - crc, band_num, site
 
@@ -368,11 +368,11 @@ def get_CRC_DB(config):
     waps = pd.unique(df1['wap'])
 
     #-add the WAP NZTMX and NZTMY
-    extsite_df = pdsql.mssql.rd_sql('edwprod01', 'Hydro', 'ExternalSite', col_names = ['ExtSiteID', 'NZTMX', 'NZTMY'], where_in = {'ExtSiteID': waps.tolist()})
+    extsite_df = pdsql.mssql.rd_sql('sql03prod', 'Wells', 'WELL_DETAILS', col_names = ['WELL_NO', 'NZTMX', 'NZTMY'], where_in = {'WELL_NO': waps.tolist()})
     extsite_df.rename(columns={'NZTMX': 'wap_NZTMX', 'NZTMY': 'wap_NZTMY'}, inplace=True)
     extsite_df.drop_duplicates(inplace=True)
-    df1 = pd.merge(df1, extsite_df, how='left', left_on='wap', right_on='ExtSiteID')
-    df1.drop('ExtSiteID', axis=1, inplace=True)
+    df1 = pd.merge(df1, extsite_df, how='left', left_on='wap', right_on='WELL_NO')
+    df1.drop('WELL_NO', axis=1, inplace=True)
     extsite_df = None; del extsite_df
     df1.loc[df1.wap =='nan', 'wap'] = np.nan
 
@@ -461,6 +461,13 @@ def get_CRC_DB(config):
     bandno_crcs = None; del bandno_crcs
     df1.drop_duplicates(inplace=True)
     df1.rename(columns={'band_num': 'BandNo'}, inplace=True)
+
+    #Add consent status
+    status_consent = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'F_ACC_Permit', col_names = ['B1_ALT_ID','B1_APPL_STATUS'], where_in={'B1_ALT_ID': df1['crc'].tolist()})
+    df1 = pd.merge(df1, status_consent, how='left', left_on=['crc'], right_on=['B1_ALT_ID'])
+    df1.drop('B1_APPL_STATUS_x', axis=1, inplace=True)
+    df1.rename(columns={'B1_APPL_STATUS_y': 'B1_APPL_STATUS'}, inplace=True)
+    status_consent = None; del status_consent
 
     #-Mike's allo table for water use
     print('Merging water use type and irrigated area...')
@@ -635,7 +642,7 @@ def get_CRC_DB_listinput(config):
     SWAZ_WAPs.rename(columns={'SWAllocationZone':'SWAZ'}, inplace=True)
         
     #-Get all the consents from the F_ACC_Permit table from the DataWarehouse that are part of the all_consents selection
-    df = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'F_ACC_Permit', col_names = ['B1_ALT_ID','B1_APPL_STATUS','fmDate','toDate','toDateText','Given Effect To','Expires','OriginalRecord','ParentAuthorisations','ChildAuthorisations','HolderAddressFullName'], where_in={'B1_ALT_ID': all_consents['RecordNo'].tolist()})
+    df = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'F_ACC_Permit', col_names = ['B1_ALT_ID', 'B1_APPL_STATUS', 'fmDate','toDate','toDateText','Given Effect To','Expires','OriginalRecord','ParentAuthorisations','ChildAuthorisations','HolderAddressFullName'], where_in={'B1_ALT_ID': all_consents['RecordNo'].tolist()})
     df['toDate'] = pd.to_datetime(df['toDate'], errors='coerce')
     df['fmDate'] = pd.to_datetime(df['fmDate'], errors='coerce')
     df['Given Effect To'] = pd.to_datetime(df['Given Effect To'], errors='coerce')
@@ -828,11 +835,11 @@ def get_CRC_DB_listinput(config):
     waps = pd.unique(df1['wap'])
 
     #-add the WAP NZTMX and NZTMY
-    extsite_df = pdsql.mssql.rd_sql('edwprod01', 'Hydro', 'ExternalSite', col_names = ['ExtSiteID', 'NZTMX', 'NZTMY'], where_in = {'ExtSiteID': waps.tolist()})
+    extsite_df = pdsql.mssql.rd_sql('sql03prod', 'Wells', 'WELL_DETAILS', col_names = ['WELL_NO', 'NZTMX', 'NZTMY'], where_in = {'WELL_NO': waps.tolist()})
     extsite_df.rename(columns={'NZTMX': 'wap_NZTMX', 'NZTMY': 'wap_NZTMY'}, inplace=True)
     extsite_df.drop_duplicates(inplace=True)
-    df1 = pd.merge(df1, extsite_df, how='left', left_on='wap', right_on='ExtSiteID')
-    df1.drop('ExtSiteID', axis=1, inplace=True)
+    df1 = pd.merge(df1, extsite_df, how='left', left_on='wap', right_on='WELL_NO')
+    df1.drop('WELL_NO', axis=1, inplace=True)
     extsite_df = None; del extsite_df
     df1.loc[df1.wap =='nan', 'wap'] = np.nan
 
@@ -919,6 +926,20 @@ def get_CRC_DB_listinput(config):
     bandno_crcs = None; del bandno_crcs
     df1.drop_duplicates(inplace=True)
     df1.rename(columns={'band_num': 'BandNo'}, inplace=True)
+
+    #Add consent status
+    status_consent = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'F_ACC_Permit', col_names = ['B1_ALT_ID','B1_APPL_STATUS'], where_in={'B1_ALT_ID': df1['crc'].tolist()})
+    df1 = pd.merge(df1, status_consent, how='left', left_on=['crc'], right_on=['B1_ALT_ID'])
+    df1.drop('B1_APPL_STATUS_x', axis=1, inplace=True)
+    df1.rename(columns={'B1_APPL_STATUS_y': 'B1_APPL_STATUS'}, inplace=True)
+    status_consent = None; del status_consent
+
+    #Add consent status
+    status_consent = pdsql.mssql.rd_sql('sql02prod', 'DataWarehouse', 'F_ACC_Permit', col_names = ['B1_ALT_ID','B1_APPL_STATUS'], where_in={'B1_ALT_ID': df1['crc'].tolist()})
+    df1 = pd.merge(df1, status_consent, how='left', left_on=['crc'], right_on=['B1_ALT_ID'])
+    df1.drop('B1_APPL_STATUS_x', axis=1, inplace=True)
+    df1.rename(columns={'B1_APPL_STATUS_y': 'B1_APPL_STATUS'}, inplace=True)
+    status_consent = None; del status_consent
 
     #-Mike's allo table for water use
     print('Merging water use type and irrigated area...')
